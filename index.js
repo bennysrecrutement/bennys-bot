@@ -1,5 +1,5 @@
 // ============================================================
-//  BOT DISCORD BENNY'S ORIGINAL MOTOR WORKS (discord.js v14)
+//  BOT DISCORD BENNY'S — version avec espace staff web (/staff)
 // ============================================================
 
 const fs = require("fs");
@@ -19,32 +19,14 @@ const {
   ActivityType,
 } = require("discord.js");
 
-// --- CONFIGURATION (variables d'environnement) --------------
+// --- CONFIG (variables d'environnement) ---------------------
 const TOKEN = (process.env.DISCORD_TOKEN || "").trim().replace(/^["']|["']$/g, "");
 const GUILD_ID = (process.env.GUILD_ID || "0").trim();
 const SALON_CANDIDATURES_ID = (process.env.SALON_CANDIDATURES_ID || "0").trim();
 const SALON_LOGS_ID = (process.env.SALON_LOGS_ID || "0").trim();
 const ROLE_RECRUTEUR_ID = (process.env.ROLE_RECRUTEUR_ID || "0").trim();
 const PORT = process.env.PORT || 8080;
-
-// --- Verification du token AVANT de demarrer ----------------
-if (!TOKEN) {
-  console.error("\n==================================================");
-  console.error(" ERREUR : la variable DISCORD_TOKEN est vide.");
-  console.error(" Ajoute-la dans les variables de ton hebergeur.");
-  console.error("==================================================\n");
-  process.exit(1);
-}
-if (TOKEN.length < 50) {
-  console.error("\n==================================================");
-  console.error(" ERREUR : le DISCORD_TOKEN semble trop court.");
-  console.error(" Longueur detectee : " + TOKEN.length + " caracteres.");
-  console.error(" Un vrai jeton de bot fait environ 70 caracteres.");
-  console.error(" -> Tu as peut-etre copie le SECRET CLIENT au lieu");
-  console.error("    du JETON. Va dans l'onglet 'Bot' du portail");
-  console.error("    developpeur Discord, section 'Jeton'.");
-  console.error("==================================================\n");
-}
+const STAFF_PASSWORD = process.env.STAFF_PASSWORD || "bennys2026";
 
 const DATA_FILE = path.join(__dirname, "bennys_data.json");
 
@@ -67,14 +49,14 @@ function saveData(data) {
 
 const TARIFS = [
   ["Réparation", "1000$"],
-  ["Dépannage Sud", "1000$"],
   ["Dépannage Nord", "1400$"],
-  ["Kit de réparation / nettoyage", "500$"],
+  ["Dépannage Sud", "1000$"],
+  ["Kit réparation/nettoyage", "500$"],
 ];
 
 const PARTENAIRES = [
-  ["Burger Shot", "Partenaire officiel de Benny's"],
-  ["BCSO", "Partenaire officiel de Benny's"],
+  ["Burger Shot", "Partenaire officiel"],
+  ["BCSO", "Partenaire officiel"],
 ];
 
 const POSTES = [
@@ -130,7 +112,57 @@ async function sendDM(user, texte) {
   }
 }
 
-// --- Clics sur les boutons Accepter / Refuser ---------------
+async function traiterCandidature(candidatId, accepter, guild) {
+  const data = loadData();
+  const candidature = data.candidatures[candidatId];
+  const nomRp = (candidature && candidature.nom_rp) || "candidat";
+  const poste = (candidature && candidature.poste) || "Apprenti Mécanicien";
+
+  let membre = null;
+  try {
+    if (guild) membre = await guild.members.fetch(candidatId);
+  } catch {}
+
+  let mpOk = false;
+
+  if (accepter) {
+    if (membre) {
+      const entry = membre.user.tag + " (" + nomRp + ") — " + poste;
+      if (!data.effectif.includes(entry)) data.effectif.push(entry);
+    }
+    if (candidature) candidature.statut = "accepte";
+    saveData(data);
+
+    if (membre) {
+      mpOk = await sendDM(
+        membre.user,
+        "🎉 **Félicitations !**\n" +
+          "Ta candidature chez **Benny's Original Motor Works** pour le poste de **" +
+          poste +
+          "** a été **retenue**.\n" +
+          "Un membre de la direction va te contacter très vite. Bienvenue ! 🔧"
+      );
+    }
+  } else {
+    if (candidature) candidature.statut = "refuse";
+    saveData(data);
+
+    if (membre) {
+      mpOk = await sendDM(
+        membre.user,
+        "❌ **Candidature non retenue**\n" +
+          "Après étude de ton dossier, ta candidature chez **Benny's Original Motor Works** " +
+          "pour le poste de **" +
+          poste +
+          "** n'a pas été retenue.\n" +
+          "Tu pourras retenter ta chance plus tard. Merci ! 🔧"
+      );
+    }
+  }
+
+  return { nomRp, poste, mpOk };
+}
+
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
@@ -146,345 +178,407 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  let membre = null;
-  try {
-    membre = await interaction.guild.members.fetch(candidatId);
-  } catch {}
-
-  const data = loadData();
-  const candidature = data.candidatures[candidatId];
-  const nomRp = (candidature && candidature.nom_rp) || "candidat";
-  const poste = (candidature && candidature.poste) || "Apprenti Mécanicien";
+  const res = await traiterCandidature(candidatId, action === "accept", interaction.guild);
 
   const disabledRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId("done_accept")
+      .setCustomId("done_a")
       .setLabel(action === "accept" ? "✅ Accepté" : "✅ Accepter")
       .setStyle(ButtonStyle.Success)
       .setDisabled(true),
     new ButtonBuilder()
-      .setCustomId("done_refuse")
+      .setCustomId("done_r")
       .setLabel(action === "refuse" ? "❌ Refusé" : "❌ Refuser")
       .setStyle(ButtonStyle.Danger)
       .setDisabled(true)
   );
 
-  let mpOk = false;
-
-  if (action === "accept") {
-    if (membre) {
-      const entry = membre.user.tag + " (" + nomRp + ") — " + poste;
-      if (!data.effectif.includes(entry)) data.effectif.push(entry);
-    }
-    if (candidature) candidature.statut = "accepte";
-    saveData(data);
-
-    if (membre) {
-      mpOk = await sendDM(
-        membre.user,
-        "🎉 **Félicitations !**\n" +
-          "Ta candidature chez **Benny's Original Motor Works** pour le poste de **" +
-          poste +
-          "** a été **retenue**.\n" +
-          "Un membre de la direction va te contacter très vite pour la suite. " +
-          "Bienvenue dans la famille ! 🔧"
-      );
-    }
-
-    await interaction.update({ components: [disabledRow] });
-    await interaction.followUp({
-      content:
-        "✅ Candidature de **" + nomRp + "** acceptée." +
-        (mpOk ? "" : " ⚠️ MP impossible (le joueur a ses MP fermés)."),
-      ephemeral: true,
-    });
-    return log("✅ Candidature de " + nomRp + " acceptée par " + interaction.user.tag);
-  }
-
-  if (candidature) candidature.statut = "refuse";
-  saveData(data);
-
-  if (membre) {
-    mpOk = await sendDM(
-      membre.user,
-      "❌ **Candidature non retenue**\n" +
-        "Après étude de ton dossier, ta candidature chez **Benny's Original Motor Works** " +
-        "pour le poste de **" +
-        poste +
-        "** n'a pas été retenue.\n" +
-        "Tu pourras retenter ta chance plus tard. Merci de ton intérêt ! 🔧"
-    );
-  }
-
   await interaction.update({ components: [disabledRow] });
   await interaction.followUp({
     content:
-      "❌ Candidature de **" + nomRp + "** refusée." +
-      (mpOk ? "" : " ⚠️ MP impossible (le joueur a ses MP fermés)."),
+      (action === "accept"
+        ? "✅ Candidature de **" + res.nomRp + "** acceptée."
+        : "❌ Candidature de **" + res.nomRp + "** refusée.") +
+      (res.mpOk ? "" : " ⚠️ MP impossible (MP fermés)."),
     ephemeral: true,
   });
-  return log("❌ Candidature de " + nomRp + " refusée par " + interaction.user.tag);
+  await log(
+    (action === "accept" ? "✅ " : "❌ ") +
+      "Candidature de " +
+      res.nomRp +
+      (action === "accept" ? " acceptée" : " refusée") +
+      " par " +
+      interaction.user.tag
+  );
 });
 
-// --- Commandes slash ----------------------------------------
 const commands = [
-  new SlashCommandBuilder().setName("ouvert").setDescription("Ouvrir le garage Benny's"),
-  new SlashCommandBuilder().setName("ferme").setDescription("Fermer le garage Benny's"),
-  new SlashCommandBuilder()
-    .setName("recrutement")
-    .setDescription("Afficher le panel de recrutement"),
-  new SlashCommandBuilder().setName("effectif").setDescription("Voir l'effectif du garage"),
+  new SlashCommandBuilder().setName("ouvert").setDescription("Ouvrir le garage"),
+  new SlashCommandBuilder().setName("ferme").setDescription("Fermer le garage"),
+  new SlashCommandBuilder().setName("recrutement").setDescription("Panel de recrutement"),
+  new SlashCommandBuilder().setName("effectif").setDescription("Voir l'effectif"),
   new SlashCommandBuilder().setName("stats").setDescription("Statistiques du garage"),
   new SlashCommandBuilder().setName("partenaires").setDescription("Liste des partenaires"),
-  new SlashCommandBuilder().setName("tarifs").setDescription("Tarifs du garage Benny's"),
+  new SlashCommandBuilder().setName("tarifs").setDescription("Tarifs du garage"),
   new SlashCommandBuilder()
     .setName("joueur")
     .setDescription("Marquer un joueur en service")
-    .addUserOption((o) =>
-      o.setName("membre").setDescription("Le joueur qui prend son service").setRequired(true)
-    ),
-  new SlashCommandBuilder()
-    .setName("candidature")
-    .setDescription("Créer un panel de candidature (recruteurs)")
-    .addUserOption((o) =>
-      o.setName("membre").setDescription("Le joueur qui postule").setRequired(true)
-    )
-    .addStringOption((o) =>
-      o.setName("nom_rp").setDescription("Nom / Prénom RP").setRequired(true)
-    )
-    .addStringOption((o) =>
-      o
-        .setName("poste")
-        .setDescription("Poste visé")
-        .addChoices(...POSTES.map((p) => ({ name: p, value: p })))
-    ),
+    .addUserOption((o) => o.setName("membre").setDescription("Le joueur").setRequired(true)),
 ].map((c) => c.toJSON());
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
-  const commandName = interaction.commandName;
+  const cmd = interaction.commandName;
   const data = loadData();
 
-  if (commandName === "ouvert") {
+  if (cmd === "ouvert") {
     data.ouvert = true;
     saveData(data);
-    await interaction.reply("🟢 Le garage **Benny's** est maintenant **OUVERT**.");
-    return log("🟢 Garage ouvert par " + interaction.user.tag);
+    await interaction.reply("🟢 Benny's est **OUVERT**.");
+    return log("🟢 Ouvert par " + interaction.user.tag);
   }
-
-  if (commandName === "ferme") {
+  if (cmd === "ferme") {
     data.ouvert = false;
     saveData(data);
-    await interaction.reply("🔴 Le garage **Benny's** est maintenant **FERMÉ**.");
-    return log("🔴 Garage fermé par " + interaction.user.tag);
+    await interaction.reply("🔴 Benny's est **FERMÉ**.");
+    return log("🔴 Fermé par " + interaction.user.tag);
   }
-
-  if (commandName === "recrutement") {
+  if (cmd === "recrutement") {
     const embed = new EmbedBuilder()
-      .setTitle("🔧 Recrutement Benny's Original Motor Works")
+      .setTitle("🔧 Recrutement Benny's")
       .setColor(0xff6a00)
       .setDescription(
-        "Le garage recrute ! Postes ouverts :\n" +
+        "Postes ouverts :\n" +
           POSTES.map((p) => "• " + p).join("\n") +
-          "\n\n👉 Dépose ta candidature sur le site web de Benny's."
+          "\n\n👉 Candidature sur le site web de Benny's."
       );
     return interaction.reply({ embeds: [embed] });
   }
-
-  if (commandName === "effectif") {
-    if (!data.effectif.length) {
-      return interaction.reply({ content: "Aucun membre enregistré.", ephemeral: true });
-    }
-    const embed = new EmbedBuilder()
-      .setTitle("👥 Effectif Benny's")
-      .setColor(0xff6a00)
-      .setDescription(data.effectif.map((m) => "• " + m).join("\n"));
-    return interaction.reply({ embeds: [embed] });
-  }
-
-  if (commandName === "stats") {
-    const list = Object.values(data.candidatures);
-    const accepte = list.filter((c) => c.statut === "accepte").length;
-    const refuse = list.filter((c) => c.statut === "refuse").length;
-    const attente = list.length - accepte - refuse;
-    const embed = new EmbedBuilder()
-      .setTitle("📊 Statistiques Benny's")
-      .setColor(0xff6a00)
-      .addFields(
-        { name: "Candidatures", value: String(list.length), inline: true },
-        { name: "✅ Acceptées", value: String(accepte), inline: true },
-        { name: "❌ Refusées", value: String(refuse), inline: true },
-        { name: "⏳ En attente", value: String(attente), inline: true },
-        { name: "👥 Effectif", value: String(data.effectif.length), inline: true },
-        { name: "🟢 Garage", value: data.ouvert ? "Ouvert" : "Fermé", inline: true }
-      );
-    return interaction.reply({ embeds: [embed] });
-  }
-
-  if (commandName === "partenaires") {
-    const embed = new EmbedBuilder()
-      .setTitle("🤝 Partenaires de Benny's")
-      .setColor(0xff6a00)
-      .setDescription(PARTENAIRES.map((p) => "**" + p[0] + "** — " + p[1]).join("\n"));
-    return interaction.reply({ embeds: [embed] });
-  }
-
-  if (commandName === "tarifs") {
-    const embed = new EmbedBuilder()
-      .setTitle("💰 Tarifs Benny's")
-      .setColor(0xff6a00)
-      .addFields(...TARIFS.map((t) => ({ name: t[0], value: t[1], inline: true })));
-    return interaction.reply({ embeds: [embed] });
-  }
-
-  if (commandName === "joueur") {
-    const membre = interaction.options.getUser("membre");
-    await interaction.reply("🔧 " + membre + " est maintenant **en service** chez Benny's.");
-    return log("🔧 " + membre.tag + " en service (déclaré par " + interaction.user.tag + ")");
-  }
-
-  if (commandName === "candidature") {
-    const membre = interaction.options.getUser("membre");
-    const nomRp = interaction.options.getString("nom_rp");
-    const poste = interaction.options.getString("poste") || "Apprenti Mécanicien";
-
-    data.candidatures[membre.id] = { nom_rp: nomRp, poste: poste, statut: "en_attente" };
-    saveData(data);
-
-    const embed = new EmbedBuilder()
-      .setTitle("🔧 Nouvelle candidature Benny's")
-      .setColor(0xff6a00)
-      .addFields(
-        { name: "Candidat", value: String(membre), inline: true },
-        { name: "Nom RP", value: nomRp, inline: true },
-        { name: "Poste", value: poste, inline: true },
-        { name: "Statut", value: "⏳ En attente", inline: false }
-      );
-
+  if (cmd === "effectif") {
+    if (!data.effectif.length)
+      return interaction.reply({ content: "Effectif vide.", ephemeral: true });
     return interaction.reply({
-      embeds: [embed],
-      components: [candidatureButtons(membre.id)],
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("👥 Effectif Benny's")
+          .setColor(0xff6a00)
+          .setDescription(data.effectif.map((m) => "• " + m).join("\n")),
+      ],
     });
+  }
+  if (cmd === "stats") {
+    const list = Object.values(data.candidatures);
+    const acc = list.filter((c) => c.statut === "accepte").length;
+    const ref = list.filter((c) => c.statut === "refuse").length;
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("📊 Statistiques Benny's")
+          .setColor(0xff6a00)
+          .addFields(
+            { name: "Candidatures", value: String(list.length), inline: true },
+            { name: "✅ Acceptées", value: String(acc), inline: true },
+            { name: "❌ Refusées", value: String(ref), inline: true },
+            { name: "⏳ En attente", value: String(list.length - acc - ref), inline: true },
+            { name: "👥 Effectif", value: String(data.effectif.length), inline: true },
+            { name: "🟢 Garage", value: data.ouvert ? "Ouvert" : "Fermé", inline: true }
+          ),
+      ],
+    });
+  }
+  if (cmd === "partenaires") {
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🤝 Partenaires")
+          .setColor(0xff6a00)
+          .setDescription(PARTENAIRES.map((p) => "**" + p[0] + "** — " + p[1]).join("\n")),
+      ],
+    });
+  }
+  if (cmd === "tarifs") {
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("💰 Tarifs Benny's")
+          .setColor(0xff6a00)
+          .addFields(...TARIFS.map((t) => ({ name: t[0], value: t[1], inline: true }))),
+      ],
+    });
+  }
+  if (cmd === "joueur") {
+    const m = interaction.options.getUser("membre");
+    await interaction.reply("🔧 " + m + " est **en service** chez Benny's.");
+    return log("🔧 " + m.tag + " en service");
   }
 });
 
-// --- Serveur web qui recoit les candidatures du site --------
+// ============================================================
+//  PAGES WEB : accueil + espace staff
+// ============================================================
+function pageHtml(titre, corps) {
+  return (
+    "<!DOCTYPE html><html lang='fr'><head><meta charset='UTF-8'>" +
+    "<meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
+    "<title>" +
+    titre +
+    "</title><style>" +
+    "body{background:#0b0b0d;color:#f4f4f5;font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;line-height:1.6}" +
+    ".wrap{max-width:900px;margin:0 auto;padding:40px 20px}" +
+    "h1{color:#ff6a00;font-size:1.6rem}" +
+    ".card{background:#1c1c1f;border:1px solid #2a2a2e;border-radius:12px;padding:22px;margin-bottom:16px}" +
+    ".card h3{margin:0 0 8px;font-size:1.1rem}" +
+    ".muted{color:#8a8a90;font-size:.88rem}" +
+    ".btn{display:inline-block;background:#ff6a00;color:#0b0b0d;border:none;border-radius:6px;padding:10px 18px;font-weight:700;cursor:pointer;font-size:.9rem;margin-right:8px;text-decoration:none}" +
+    ".btn.refuse{background:#c0392b;color:#fff}" +
+    ".badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:700}" +
+    ".b-attente{background:rgba(255,170,0,.15);color:#ffaa00}" +
+    ".b-accepte{background:rgba(46,204,113,.15);color:#2ecc71}" +
+    ".b-refuse{background:rgba(192,57,43,.15);color:#e74c3c}" +
+    "input{width:100%;padding:11px;border-radius:7px;border:1px solid #2a2a2e;background:#0b0b0d;color:#fff;box-sizing:border-box;margin-bottom:12px}" +
+    "</style></head><body><div class='wrap'>" +
+    corps +
+    "</div></body></html>"
+  );
+}
+
+function renderStaffPage(erreur) {
+  const data = loadData();
+  const liste = Object.entries(data.candidatures).reverse();
+
+  let html =
+    "<h1>🔧 Espace Staff — Benny's</h1>" +
+    "<p class='muted'>" +
+    liste.length +
+    " candidature(s) • Effectif : " +
+    data.effectif.length +
+    " • Garage : " +
+    (data.ouvert ? "ouvert" : "fermé") +
+    "</p>";
+
+  if (erreur) html += "<div class='card' style='border-color:#c0392b'><b>" + erreur + "</b></div>";
+
+  if (!liste.length) {
+    html += "<div class='card'><p class='muted'>Aucune candidature pour le moment.</p></div>";
+  }
+
+  for (const [id, c] of liste) {
+    const statut =
+      c.statut === "accepte"
+        ? "<span class='badge b-accepte'>Accepté</span>"
+        : c.statut === "refuse"
+        ? "<span class='badge b-refuse'>Refusé</span>"
+        : "<span class='badge b-attente'>En attente</span>";
+
+    html +=
+      "<div class='card'><h3>" +
+      (c.nom_rp || "Sans nom") +
+      " — " +
+      (c.poste || "Poste inconnu") +
+      " " +
+      statut +
+      "</h3>" +
+      "<p class='muted'>Discord : " +
+      (c.discord || "-") +
+      " • Âge RP : " +
+      (c.age || "-") +
+      "</p>" +
+      "<p>" +
+      (c.motivation || "") +
+      "</p>";
+
+    if (c.statut === "en_attente") {
+      html +=
+        "<form method='POST' action='/staff/decision' style='display:inline'>" +
+        "<input type='hidden' name='id' value='" +
+        id +
+        "'>" +
+        "<input type='hidden' name='decision' value='accepte'>" +
+        "<button class='btn' type='submit'>✅ Accepter</button></form>" +
+        "<form method='POST' action='/staff/decision' style='display:inline'>" +
+        "<input type='hidden' name='id' value='" +
+        id +
+        "'>" +
+        "<input type='hidden' name='decision' value='refuse'>" +
+        "<button class='btn refuse' type='submit'>❌ Refuser</button></form>";
+    }
+
+    html += "</div>";
+  }
+
+  return pageHtml("Espace Staff Benny's", html);
+}
+
+function renderLoginPage(erreur) {
+  return pageHtml(
+    "Connexion Staff",
+    "<h1>🔧 Espace Staff Benny's</h1>" +
+      "<p class='muted'>Accès réservé à la direction.</p>" +
+      (erreur ? "<div class='card' style='border-color:#c0392b'>" + erreur + "</div>" : "") +
+      "<div class='card'><form method='POST' action='/staff'>" +
+      "<input type='password' name='mdp' placeholder='Mot de passe' required>" +
+      "<button class='btn' type='submit'>Se connecter</button></form></div>"
+  );
+}
+
+function parseBody(req, cb) {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => cb(body));
+}
+
 const server = http.createServer(async (req, res) => {
-  if (req.method === "POST" && req.url === "/candidature-webhook") {
-    let body = "";
-    req.on("data", (chunk) => (body += chunk));
-    req.on("end", async () => {
-      let payload;
+  const url = req.url.split("?")[0];
+
+  if (req.method === "POST" && url === "/candidature-webhook") {
+    return parseBody(req, async (body) => {
+      let p;
       try {
-        payload = JSON.parse(body);
+        p = JSON.parse(body);
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ ok: false, error: "json invalide" }));
       }
 
       try {
-        const salon = await client.channels.fetch(SALON_CANDIDATURES_ID);
-        if (!salon || !salon.isTextBased()) throw new Error("salon introuvable");
+        const nomRp = p.rpName || "-";
+        const disc = p.discordTag || "-";
+        const poste = p.poste || "Apprenti Mécanicien";
+        const id = "w" + Date.now();
 
-        const nomRp = payload.rpName || "-";
-        const discordTag = payload.discordTag || "-";
-        const poste = payload.poste || "Apprenti Mécanicien";
+        const data = loadData();
+        data.candidatures[id] = {
+          nom_rp: nomRp,
+          discord: disc,
+          age: p.rpAge || "-",
+          poste: poste,
+          dispo: p.dispo || "-",
+          experience: p.experience || "-",
+          motivation: p.motivation || "-",
+          statut: "en_attente",
+        };
+        saveData(data);
 
-        let membre = null;
-        try {
-          const guild = await client.guilds.fetch(GUILD_ID);
-          const membres = await guild.members.fetch();
-          const pseudo = String(discordTag).replace("@", "").split("#")[0].toLowerCase();
-          membre = membres.find(
-            (m) =>
-              m.user.username.toLowerCase() === pseudo ||
-              m.displayName.toLowerCase() === pseudo
-          );
-        } catch {}
-
-        const embed = new EmbedBuilder()
-          .setTitle("🔧 Nouvelle candidature Benny's")
-          .setColor(0xff6a00)
-          .addFields(
-            { name: "Nom RP", value: nomRp, inline: true },
-            { name: "Discord", value: discordTag, inline: true },
-            { name: "Âge RP", value: String(payload.rpAge || "-"), inline: true },
-            { name: "Poste", value: poste, inline: true },
-            { name: "Disponibilités", value: payload.dispo || "-", inline: false },
-            { name: "Expérience", value: payload.experience || "-", inline: false },
-            { name: "Motivation", value: payload.motivation || "-", inline: false }
-          );
-
-        if (membre) {
-          const data = loadData();
-          data.candidatures[membre.id] = { nom_rp: nomRp, poste: poste, statut: "en_attente" };
-          saveData(data);
-          await salon.send({ embeds: [embed], components: [candidatureButtons(membre.id)] });
-        } else {
-          embed.setFooter({ text: "⚠️ Joueur non trouvé sur le serveur — MP impossible" });
-          await salon.send({ embeds: [embed] });
+        if (SALON_CANDIDATURES_ID && SALON_CANDIDATURES_ID !== "0") {
+          try {
+            const salon = await client.channels.fetch(SALON_CANDIDATURES_ID);
+            if (salon && salon.isTextBased()) {
+              const embed = new EmbedBuilder()
+                .setTitle("🔧 Nouvelle candidature Benny's")
+                .setColor(0xff6a00)
+                .addFields(
+                  { name: "Nom RP", value: nomRp, inline: true },
+                  { name: "Discord", value: disc, inline: true },
+                  { name: "Âge RP", value: String(p.rpAge || "-"), inline: true },
+                  { name: "Poste", value: poste, inline: true },
+                  { name: "Disponibilités", value: p.dispo || "-", inline: false },
+                  { name: "Expérience", value: p.experience || "-", inline: false },
+                  { name: "Motivation", value: p.motivation || "-", inline: false }
+                )
+                .setFooter({ text: "Traiter aussi depuis le site : /staff" });
+              await salon.send({ embeds: [embed] });
+            }
+          } catch (e) {
+            console.error("Post salon impossible :", e.message);
+          }
         }
 
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true }));
+        return res.end(JSON.stringify({ ok: true }));
       } catch (err) {
         res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: String(err) }));
+        return res.end(JSON.stringify({ ok: false, error: String(err) }));
       }
     });
-    return;
   }
 
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("Bot Benny's en ligne ✅");
+  if (req.method === "POST" && url === "/staff") {
+    return parseBody(req, (body) => {
+      const params = new URLSearchParams(body);
+      const mdp = params.get("mdp") || "";
+      if (mdp === STAFF_PASSWORD) {
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Set-Cookie": "bennys_staff=ok; Path=/; HttpOnly; SameSite=Lax",
+        });
+        return res.end(renderStaffPage());
+      }
+      res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(renderLoginPage("Mot de passe incorrect."));
+    });
+  }
+
+  if (req.method === "POST" && url === "/staff/decision") {
+    return parseBody(req, async (body) => {
+      const params = new URLSearchParams(body);
+      const id = params.get("id");
+      const decision = params.get("decision");
+
+      const data = loadData();
+      const c = data.candidatures[id];
+      if (c) {
+        c.statut = decision === "accepte" ? "accepte" : "refuse";
+        if (decision === "accepte") {
+          const entry = (c.nom_rp || "candidat") + " — " + (c.poste || "poste");
+          if (!data.effectif.includes(entry)) data.effectif.push(entry);
+        }
+        saveData(data);
+        await log(
+          (decision === "accepte" ? "✅ " : "❌ ") +
+            "Candidature de " +
+            (c.nom_rp || "candidat") +
+            (decision === "accepte" ? " acceptée" : " refusée") +
+            " depuis l'espace staff"
+        );
+      }
+
+      res.writeHead(302, { Location: "/staff" });
+      return res.end();
+    });
+  }
+
+  if (url === "/staff") {
+    const cookie = req.headers.cookie || "";
+    if (!cookie.includes("bennys_staff=ok")) {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(renderLoginPage());
+    }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    return res.end(renderStaffPage());
+  }
+
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(
+    pageHtml(
+      "Bot Benny's",
+      "<h1>🔧 Bot Benny's</h1>" +
+        "<div class='card'><b>Bot Benny's en ligne ✅</b>" +
+        "<p class='muted'>Espace staff : <a href='/staff' style='color:#ff6a00'>/staff</a></p></div>"
+    )
+  );
 });
 
-server.listen(PORT, () => console.log("🌐 Serveur webhook démarré sur le port " + PORT));
+server.listen(PORT, () => console.log("🌐 Serveur webhook + espace staff sur le port " + PORT));
 
-// --- Demarrage (evenement 'ready', compatible v14) ----------
 client.once("ready", async () => {
   console.log("✅ Bot Benny's connecté en tant que " + client.user.tag);
-
   try {
     const rest = new REST({ version: "10" }).setToken(TOKEN);
     if (GUILD_ID && GUILD_ID !== "0") {
       await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), {
         body: commands,
       });
-      console.log("✅ Commandes slash enregistrées sur le serveur " + GUILD_ID);
     } else {
       await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-      console.log("✅ Commandes slash enregistrées globalement");
     }
+    console.log("✅ Commandes slash enregistrées");
   } catch (err) {
-    console.error("Erreur enregistrement des commandes :", err.message);
+    console.error("Erreur commandes :", err.message);
   }
-
   client.user.setActivity("Garage Benny's 🔧", { type: ActivityType.Watching });
 });
 
-// --- Connexion avec message d'erreur clair ------------------
 client.login(TOKEN).catch((err) => {
-  if (err && err.code === "TokenInvalid") {
-    console.error("\n==================================================");
-    console.error(" JETON REFUSE PAR DISCORD");
-    console.error("==================================================");
-    console.error(" Le jeton fourni n'est pas valide. Causes possibles :");
-    console.error("");
-    console.error(" 1. Tu as copie le SECRET CLIENT (onglet");
-    console.error("    'Informations generales') au lieu du JETON");
-    console.error("    (onglet 'Bot' > section 'Jeton').");
-    console.error("");
-    console.error(" 2. Le jeton a ete reinitialise apres la copie :");
-    console.error("    il faut recopier le nouveau.");
-    console.error("");
-    console.error(" 3. Un espace ou un guillemet s'est glissé dedans.");
-    console.error("");
-    console.error(" Longueur du jeton lu : " + TOKEN.length + " caracteres");
-    console.error(" (un vrai jeton fait environ 70 caracteres)");
-    console.error("==================================================\n");
-  } else {
-    console.error("Erreur de connexion :", err);
-  }
+  console.error("Erreur de connexion :", err.message || err);
   process.exit(1);
 });
