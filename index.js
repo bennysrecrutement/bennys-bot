@@ -19,14 +19,32 @@ const {
   ActivityType,
 } = require("discord.js");
 
-// --- 1) CONFIGURATION (variables d'environnement) -----------
-const TOKEN = process.env.DISCORD_TOKEN || "MTU0OTgzMjcxNzA1MzcyMjc3NA.G4_EX3.BQdum5L0pVmI-1m8ZEczx3_YQzzSX91tddQjRQ";
-const GUILD_ID = process.env.GUILD_ID || "0";
-const SALON_CANDIDATURES_ID = process.env.SALON_CANDIDATURES_ID || "0";
-const SALON_LOGS_ID = process.env.SALON_LOGS_ID || "0";
-const ROLE_RECRUTEUR_ID = process.env.ROLE_RECRUTEUR_ID || "0";
+// --- CONFIGURATION (variables d'environnement) --------------
+const TOKEN = (process.env.DISCORD_TOKEN || "").trim().replace(/^["']|["']$/g, "");
+const GUILD_ID = (process.env.GUILD_ID || "0").trim();
+const SALON_CANDIDATURES_ID = (process.env.SALON_CANDIDATURES_ID || "0").trim();
+const SALON_LOGS_ID = (process.env.SALON_LOGS_ID || "0").trim();
+const ROLE_RECRUTEUR_ID = (process.env.ROLE_RECRUTEUR_ID || "0").trim();
 const PORT = process.env.PORT || 8080;
-// ------------------------------------------------------------
+
+// --- Verification du token AVANT de demarrer ----------------
+if (!TOKEN) {
+  console.error("\n==================================================");
+  console.error(" ERREUR : la variable DISCORD_TOKEN est vide.");
+  console.error(" Ajoute-la dans les variables de ton hebergeur.");
+  console.error("==================================================\n");
+  process.exit(1);
+}
+if (TOKEN.length < 50) {
+  console.error("\n==================================================");
+  console.error(" ERREUR : le DISCORD_TOKEN semble trop court.");
+  console.error(" Longueur detectee : " + TOKEN.length + " caracteres.");
+  console.error(" Un vrai jeton de bot fait environ 70 caracteres.");
+  console.error(" -> Tu as peut-etre copie le SECRET CLIENT au lieu");
+  console.error("    du JETON. Va dans l'onglet 'Bot' du portail");
+  console.error("    developpeur Discord, section 'Jeton'.");
+  console.error("==================================================\n");
+}
 
 const DATA_FILE = path.join(__dirname, "bennys_data.json");
 
@@ -40,7 +58,11 @@ function loadData() {
 }
 
 function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf-8");
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf-8");
+  } catch (e) {
+    console.error("Sauvegarde impossible :", e.message);
+  }
 }
 
 const TARIFS = [
@@ -82,17 +104,16 @@ async function log(texte) {
 }
 
 function candidatureButtons(candidatId) {
-  const row = new ActionRowBuilder().addComponents(
+  return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`accept_${candidatId}`)
+      .setCustomId("accept_" + candidatId)
       .setLabel("✅ Accepter")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId(`refuse_${candidatId}`)
+      .setCustomId("refuse_" + candidatId)
       .setLabel("❌ Refuser")
       .setStyle(ButtonStyle.Danger)
   );
-  return row;
 }
 
 function hasPermission(member) {
@@ -109,6 +130,7 @@ async function sendDM(user, texte) {
   }
 }
 
+// --- Clics sur les boutons Accepter / Refuser ---------------
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
@@ -151,7 +173,7 @@ client.on("interactionCreate", async (interaction) => {
 
   if (action === "accept") {
     if (membre) {
-      const entry = `${membre.user.tag} (${nomRp}) — ${poste}`;
+      const entry = membre.user.tag + " (" + nomRp + ") — " + poste;
       if (!data.effectif.includes(entry)) data.effectif.push(entry);
     }
     if (candidature) candidature.statut = "accepte";
@@ -170,40 +192,41 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     await interaction.update({ components: [disabledRow] });
-    await interaction.followup({
+    await interaction.followUp({
       content:
-        `✅ Candidature de **${nomRp}** acceptée.` +
+        "✅ Candidature de **" + nomRp + "** acceptée." +
         (mpOk ? "" : " ⚠️ MP impossible (le joueur a ses MP fermés)."),
       ephemeral: true,
     });
-    await log(`✅ Candidature de ${nomRp} acceptée par ${interaction.user.tag}`);
-  } else {
-    if (candidature) candidature.statut = "refuse";
-    saveData(data);
-
-    if (membre) {
-      mpOk = await sendDM(
-        membre.user,
-        "❌ **Candidature non retenue**\n" +
-          "Après étude de ton dossier, ta candidature chez **Benny's Original Motor Works** " +
-          "pour le poste de **" +
-          poste +
-          "** n'a pas été retenue.\n" +
-          "Tu pourras retenter ta chance plus tard. Merci de ton intérêt ! 🔧"
-      );
-    }
-
-    await interaction.update({ components: [disabledRow] });
-    await interaction.followup({
-      content:
-        `❌ Candidature de **${nomRp}** refusée.` +
-        (mpOk ? "" : " ⚠️ MP impossible (le joueur a ses MP fermés)."),
-      ephemeral: true,
-    });
-    await log(`❌ Candidature de ${nomRp} refusée par ${interaction.user.tag}`);
+    return log("✅ Candidature de " + nomRp + " acceptée par " + interaction.user.tag);
   }
+
+  if (candidature) candidature.statut = "refuse";
+  saveData(data);
+
+  if (membre) {
+    mpOk = await sendDM(
+      membre.user,
+      "❌ **Candidature non retenue**\n" +
+        "Après étude de ton dossier, ta candidature chez **Benny's Original Motor Works** " +
+        "pour le poste de **" +
+        poste +
+        "** n'a pas été retenue.\n" +
+        "Tu pourras retenter ta chance plus tard. Merci de ton intérêt ! 🔧"
+    );
+  }
+
+  await interaction.update({ components: [disabledRow] });
+  await interaction.followUp({
+    content:
+      "❌ Candidature de **" + nomRp + "** refusée." +
+      (mpOk ? "" : " ⚠️ MP impossible (le joueur a ses MP fermés)."),
+    ephemeral: true,
+  });
+  return log("❌ Candidature de " + nomRp + " refusée par " + interaction.user.tag);
 });
 
+// --- Commandes slash ----------------------------------------
 const commands = [
   new SlashCommandBuilder().setName("ouvert").setDescription("Ouvrir le garage Benny's"),
   new SlashCommandBuilder().setName("ferme").setDescription("Fermer le garage Benny's"),
@@ -226,7 +249,9 @@ const commands = [
     .addUserOption((o) =>
       o.setName("membre").setDescription("Le joueur qui postule").setRequired(true)
     )
-    .addStringOption((o) => o.setName("nom_rp").setDescription("Nom / Prénom RP").setRequired(true))
+    .addStringOption((o) =>
+      o.setName("nom_rp").setDescription("Nom / Prénom RP").setRequired(true)
+    )
     .addStringOption((o) =>
       o
         .setName("poste")
@@ -244,14 +269,14 @@ client.on("interactionCreate", async (interaction) => {
     data.ouvert = true;
     saveData(data);
     await interaction.reply("🟢 Le garage **Benny's** est maintenant **OUVERT**.");
-    return log(`🟢 Garage ouvert par ${interaction.user.tag}`);
+    return log("🟢 Garage ouvert par " + interaction.user.tag);
   }
 
   if (commandName === "ferme") {
     data.ouvert = false;
     saveData(data);
     await interaction.reply("🔴 Le garage **Benny's** est maintenant **FERMÉ**.");
-    return log(`🔴 Garage fermé par ${interaction.user.tag}`);
+    return log("🔴 Garage fermé par " + interaction.user.tag);
   }
 
   if (commandName === "recrutement") {
@@ -300,7 +325,7 @@ client.on("interactionCreate", async (interaction) => {
     const embed = new EmbedBuilder()
       .setTitle("🤝 Partenaires de Benny's")
       .setColor(0xff6a00)
-      .setDescription(PARTENAIRES.map((item) => `**${item[0]}** — ${item[1]}`).join("\n"));
+      .setDescription(PARTENAIRES.map((p) => "**" + p[0] + "** — " + p[1]).join("\n"));
     return interaction.reply({ embeds: [embed] });
   }
 
@@ -308,14 +333,14 @@ client.on("interactionCreate", async (interaction) => {
     const embed = new EmbedBuilder()
       .setTitle("💰 Tarifs Benny's")
       .setColor(0xff6a00)
-      .addFields(...TARIFS.map((item) => ({ name: item[0], value: item[1], inline: true })));
+      .addFields(...TARIFS.map((t) => ({ name: t[0], value: t[1], inline: true })));
     return interaction.reply({ embeds: [embed] });
   }
 
   if (commandName === "joueur") {
     const membre = interaction.options.getUser("membre");
-    await interaction.reply(`🔧 ${membre} est maintenant **en service** chez Benny's.`);
-    return log(`🔧 ${membre.tag} en service (déclaré par ${interaction.user.tag})`);
+    await interaction.reply("🔧 " + membre + " est maintenant **en service** chez Benny's.");
+    return log("🔧 " + membre.tag + " en service (déclaré par " + interaction.user.tag + ")");
   }
 
   if (commandName === "candidature") {
@@ -330,7 +355,7 @@ client.on("interactionCreate", async (interaction) => {
       .setTitle("🔧 Nouvelle candidature Benny's")
       .setColor(0xff6a00)
       .addFields(
-        { name: "Candidat", value: `${membre}`, inline: true },
+        { name: "Candidat", value: String(membre), inline: true },
         { name: "Nom RP", value: nomRp, inline: true },
         { name: "Poste", value: poste, inline: true },
         { name: "Statut", value: "⏳ En attente", inline: false }
@@ -343,6 +368,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
+// --- Serveur web qui recoit les candidatures du site --------
 const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/candidature-webhook") {
     let body = "";
@@ -393,14 +419,9 @@ const server = http.createServer(async (req, res) => {
           const data = loadData();
           data.candidatures[membre.id] = { nom_rp: nomRp, poste: poste, statut: "en_attente" };
           saveData(data);
-          await salon.send({
-            embeds: [embed],
-            components: [candidatureButtons(membre.id)],
-          });
+          await salon.send({ embeds: [embed], components: [candidatureButtons(membre.id)] });
         } else {
-          embed.setFooter({
-            text: "⚠️ Joueur non trouvé sur le serveur — MP impossible",
-          });
+          embed.setFooter({ text: "⚠️ Joueur non trouvé sur le serveur — MP impossible" });
           await salon.send({ embeds: [embed] });
         }
 
@@ -414,14 +435,15 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
   res.end("Bot Benny's en ligne ✅");
 });
 
 server.listen(PORT, () => console.log("🌐 Serveur webhook démarré sur le port " + PORT));
 
-client.once("clientReady", async () => {
-  console.log(`✅ Bot Benny's connecté en tant que ${client.user.tag}`);
+// --- Demarrage (evenement 'ready', compatible v14) ----------
+client.once("ready", async () => {
+  console.log("✅ Bot Benny's connecté en tant que " + client.user.tag);
 
   try {
     const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -429,15 +451,40 @@ client.once("clientReady", async () => {
       await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), {
         body: commands,
       });
+      console.log("✅ Commandes slash enregistrées sur le serveur " + GUILD_ID);
     } else {
       await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+      console.log("✅ Commandes slash enregistrées globalement");
     }
-    console.log("✅ Commandes slash enregistrées");
   } catch (err) {
-    console.error("Erreur enregistrement des commandes :", err);
+    console.error("Erreur enregistrement des commandes :", err.message);
   }
 
   client.user.setActivity("Garage Benny's 🔧", { type: ActivityType.Watching });
 });
 
-client.login(TOKEN);
+// --- Connexion avec message d'erreur clair ------------------
+client.login(TOKEN).catch((err) => {
+  if (err && err.code === "TokenInvalid") {
+    console.error("\n==================================================");
+    console.error(" JETON REFUSE PAR DISCORD");
+    console.error("==================================================");
+    console.error(" Le jeton fourni n'est pas valide. Causes possibles :");
+    console.error("");
+    console.error(" 1. Tu as copie le SECRET CLIENT (onglet");
+    console.error("    'Informations generales') au lieu du JETON");
+    console.error("    (onglet 'Bot' > section 'Jeton').");
+    console.error("");
+    console.error(" 2. Le jeton a ete reinitialise apres la copie :");
+    console.error("    il faut recopier le nouveau.");
+    console.error("");
+    console.error(" 3. Un espace ou un guillemet s'est glissé dedans.");
+    console.error("");
+    console.error(" Longueur du jeton lu : " + TOKEN.length + " caracteres");
+    console.error(" (un vrai jeton fait environ 70 caracteres)");
+    console.error("==================================================\n");
+  } else {
+    console.error("Erreur de connexion :", err);
+  }
+  process.exit(1);
+});
