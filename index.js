@@ -20,7 +20,7 @@ const {
 } = require("discord.js");
 
 // --- 1) CONFIGURATION (variables d'environnement) -----------
-const TOKEN = process.env.DISCORD_TOKEN || "COLLE_TON_TOKEN_ICI";
+const TOKEN = process.env.DISCORD_TOKEN || "MTU0OTgzMjcxNzA1MzcyMjc3NA.GMtdBa.bZvwrOVay53LduEjkqlA3KP9P_F7sMvpcPihgo";
 const GUILD_ID = process.env.GUILD_ID || "0";
 const SALON_CANDIDATURES_ID = process.env.SALON_CANDIDATURES_ID || "0";
 const SALON_LOGS_ID = process.env.SALON_LOGS_ID || "0";
