@@ -65,6 +65,8 @@ const POSTES = [
   "Mécanicien Confirmé",
   "Chef d'Équipe",
   "Directeur Référent",
+  "Co-Patron",
+  "Patron",
 ];
 
 const client = new Client({
@@ -224,6 +226,21 @@ const commands = [
     .setName("joueur")
     .setDescription("Marquer un joueur en service")
     .addUserOption((o) => o.setName("membre").setDescription("Le joueur").setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("candidature")
+    .setDescription("Créer un panel de candidature (recruteurs)")
+    .addUserOption((o) =>
+      o.setName("membre").setDescription("Le joueur qui postule").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o.setName("nom_rp").setDescription("Nom / Prénom RP").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o
+        .setName("poste")
+        .setDescription("Poste visé")
+        .addChoices(...POSTES.map((p) => ({ name: p, value: p })))
+    ),
 ].map((c) => c.toJSON());
 
 client.on("interactionCreate", async (interaction) => {
@@ -311,6 +328,29 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.reply("🔧 " + m + " est **en service** chez Benny's.");
     return log("🔧 " + m.tag + " en service");
   }
+  if (cmd === "candidature") {
+    const membre = interaction.options.getUser("membre");
+    const nomRp = interaction.options.getString("nom_rp");
+    const poste = interaction.options.getString("poste") || "Apprenti Mécanicien";
+
+    data.candidatures[membre.id] = { nom_rp: nomRp, poste: poste, statut: "en_attente" };
+    saveData(data);
+
+    const embed = new EmbedBuilder()
+      .setTitle("🔧 Nouvelle candidature Benny's")
+      .setColor(0xff6a00)
+      .addFields(
+        { name: "Candidat", value: String(membre), inline: true },
+        { name: "Nom RP", value: nomRp, inline: true },
+        { name: "Poste", value: poste, inline: true },
+        { name: "Statut", value: "⏳ En attente", inline: false }
+      );
+
+    return interaction.reply({
+      embeds: [embed],
+      components: [candidatureButtons(membre.id)],
+    });
+  }
 });
 
 // ============================================================
@@ -335,7 +375,7 @@ function pageHtml(titre, corps) {
     ".b-attente{background:rgba(255,170,0,.15);color:#ffaa00}" +
     ".b-accepte{background:rgba(46,204,113,.15);color:#2ecc71}" +
     ".b-refuse{background:rgba(192,57,43,.15);color:#e74c3c}" +
-    "input{width:100%;padding:11px;border-radius:7px;border:1px solid #2a2a2e;background:#0b0b0d;color:#fff;box-sizing:border-box;margin-bottom:12px}" +
+    "input,select{width:100%;padding:11px;border-radius:7px;border:1px solid #2a2a2e;background:#0b0b0d;color:#fff;box-sizing:border-box;margin-bottom:12px}" +
     "</style></head><body><div class='wrap'>" +
     corps +
     "</div></body></html>"
@@ -354,7 +394,19 @@ function renderStaffPage(erreur) {
     data.effectif.length +
     " • Garage : " +
     (data.ouvert ? "ouvert" : "fermé") +
-    "</p>";
+    "</p>" +
+    "<div class='card'><h3>➕ Ajouter une candidature à la main</h3>" +
+    "<form method='POST' action='/staff/ajouter'>" +
+    "<input type='text' name='nom_rp' placeholder='Nom / Prénom RP' required>" +
+    "<input type='text' name='discord' placeholder='Pseudo Discord'>" +
+    "<input type='text' name='age' placeholder='Âge RP'>" +
+    "<select name='poste'>" +
+    POSTES.map((p) => "<option value='" + p + "'>" + p + "</option>").join("") +
+    "</select>" +
+    "<input type='text' name='dispo' placeholder='Disponibilités'>" +
+    "<input type='text' name='motivation' placeholder='Motivation'>" +
+    "<button class='btn' type='submit'>Ajouter la candidature</button>" +
+    "</form></div>";
 
   if (erreur) html += "<div class='card' style='border-color:#c0392b'><b>" + erreur + "</b></div>";
 
@@ -505,6 +557,32 @@ const server = http.createServer(async (req, res) => {
       }
       res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
       return res.end(renderLoginPage("Mot de passe incorrect."));
+    });
+  }
+
+  if (req.method === "POST" && url === "/staff/ajouter") {
+    return parseBody(req, async (body) => {
+      const params = new URLSearchParams(body);
+      const nomRp = params.get("nom_rp") || "-";
+      const poste = params.get("poste") || "Apprenti Mécanicien";
+      const id = "m" + Date.now();
+
+      const data = loadData();
+      data.candidatures[id] = {
+        nom_rp: nomRp,
+        discord: params.get("discord") || "-",
+        age: params.get("age") || "-",
+        poste: poste,
+        dispo: params.get("dispo") || "-",
+        experience: "-",
+        motivation: params.get("motivation") || "-",
+        statut: "en_attente",
+      };
+      saveData(data);
+      await log("➕ Candidature ajoutée à la main : " + nomRp + " — " + poste);
+
+      res.writeHead(302, { Location: "/staff" });
+      return res.end();
     });
   }
 
