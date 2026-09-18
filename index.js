@@ -1,6 +1,7 @@
 // ============================================================
 //  BOT DISCORD BENNY'S
-//  Dashboard + sauvegarde persistante + grades + mise en avant
+//  Dashboard + sauvegarde GitHub + grades + mise en avant
+//  + statut de recrutement + theme violet
 // ============================================================
 
 const fs = require("fs");
@@ -84,6 +85,7 @@ async function githubSave(data) {
 
 const DEFAULT_DATA = {
   ouvert: false,
+  recrutement: true,
   effectif: [],
   candidatures: {},
   miseEnAvant: {
@@ -293,7 +295,7 @@ client.on("interactionCreate", async (interaction) => {
 const commands = [
   new SlashCommandBuilder().setName("ouvert").setDescription("Ouvrir le garage"),
   new SlashCommandBuilder().setName("ferme").setDescription("Fermer le garage"),
-  new SlashCommandBuilder().setName("recrutement").setDescription("Panel de recrutement"),
+  new SlashCommandBuilder().setName("recrutement").setDescription("Etat du recrutement"),
   new SlashCommandBuilder().setName("effectif").setDescription("Voir l'effectif"),
   new SlashCommandBuilder().setName("stats").setDescription("Statistiques du garage"),
   new SlashCommandBuilder().setName("partenaires").setDescription("Liste des partenaires"),
@@ -350,23 +352,23 @@ client.on("interactionCreate", async (interaction) => {
     if (mvp.meilleureSatisfaction) lignes.push("⭐ **Meilleure satisfaction client** : " + mvp.meilleureSatisfaction);
     const embed = new EmbedBuilder()
       .setTitle("🏆 Mise en avant — Benny's")
-      .setColor(0xff6a00)
+      .setColor(0x8b5cf6)
       .setDescription(lignes.length ? lignes.join("\n") : "Aucune mise en avant pour le moment.");
     return interaction.reply({ embeds: [embed] });
   }
   if (cmd === "recrutement") {
-    return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("🔧 Recrutement Benny's")
-          .setColor(0xff6a00)
-          .setDescription(
-            "Postes ouverts :\n" +
+    const ouvert = data.recrutement !== false;
+    const embed = new EmbedBuilder()
+      .setTitle("🔧 Recrutement Benny's")
+      .setColor(0x8b5cf6)
+      .setDescription(
+        ouvert
+          ? "Postes ouverts :\n" +
               POSTES.map((p) => "• " + p).join("\n") +
               "\n\n👉 Candidature sur le site web de Benny's."
-          ),
-      ],
-    });
+          : "❌ Le recrutement est actuellement **fermé**. Reviens plus tard !"
+      );
+    return interaction.reply({ embeds: [embed] });
   }
   if (cmd === "effectif") {
     if (!data.effectif.length)
@@ -375,7 +377,7 @@ client.on("interactionCreate", async (interaction) => {
       embeds: [
         new EmbedBuilder()
           .setTitle("👥 Effectif Benny's")
-          .setColor(0xff6a00)
+          .setColor(0x8b5cf6)
           .setDescription(
             data.effectif
               .map(
@@ -401,14 +403,15 @@ client.on("interactionCreate", async (interaction) => {
       embeds: [
         new EmbedBuilder()
           .setTitle("📊 Statistiques Benny's")
-          .setColor(0xff6a00)
+          .setColor(0x8b5cf6)
           .addFields(
             { name: "Candidatures", value: String(list.length), inline: true },
             { name: "✅ Acceptées", value: String(acc), inline: true },
             { name: "❌ Refusées", value: String(ref), inline: true },
             { name: "⏳ En attente", value: String(list.length - acc - ref), inline: true },
             { name: "👥 Effectif", value: String(data.effectif.length) + " (" + actifs + " actifs)", inline: true },
-            { name: "🟢 Garage", value: data.ouvert ? "Ouvert" : "Fermé", inline: true }
+            { name: "🟢 Garage", value: data.ouvert ? "Ouvert" : "Fermé", inline: true },
+            { name: "📢 Recrutement", value: data.recrutement !== false ? "Ouvert" : "Fermé", inline: true }
           ),
       ],
     });
@@ -418,7 +421,7 @@ client.on("interactionCreate", async (interaction) => {
       embeds: [
         new EmbedBuilder()
           .setTitle("🤝 Partenaires")
-          .setColor(0xff6a00)
+          .setColor(0x8b5cf6)
           .setDescription(data.partenaires.map((p) => "**" + p[0] + "** — " + p[1]).join("\n")),
       ],
     });
@@ -428,7 +431,7 @@ client.on("interactionCreate", async (interaction) => {
       embeds: [
         new EmbedBuilder()
           .setTitle("💰 Tarifs Benny's")
-          .setColor(0xff6a00)
+          .setColor(0x8b5cf6)
           .addFields(...data.tarifs.map((t) => ({ name: t[0], value: t[1], inline: true }))),
       ],
     });
@@ -464,16 +467,16 @@ function pageHtml(titre, corps) {
     "<title>" + titre + "</title><style>" +
     "body{background:#0b0b0d;color:#f4f4f5;font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;line-height:1.6}" +
     ".wrap{max-width:1000px;margin:0 auto;padding:32px 20px 60px}" +
-    "h1{color:#ff6a00;font-size:1.5rem;margin:0 0 4px}" +
+    "h1{color:#a78bfa;font-size:1.5rem;margin:0 0 4px}" +
     "h2{font-size:1.05rem;margin:0 0 14px;color:#fff}" +
     ".top{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px}" +
-    ".muted{color:#8a8a90;font-size:.86rem;margin:0}" +
+    ".muted{color:#8e8a99;font-size:.86rem;margin:0}" +
     ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:26px}" +
-    ".stat{background:#1c1c1f;border:1px solid #2a2a2e;border-radius:12px;padding:18px;text-align:center}" +
-    ".stat b{display:block;font-size:1.7rem;color:#ff6a00;font-weight:900}" +
-    ".stat span{color:#8a8a90;font-size:.75rem;text-transform:uppercase;letter-spacing:1px}" +
-    ".card{background:#1c1c1f;border:1px solid #2a2a2e;border-radius:12px;padding:20px;margin-bottom:16px}" +
-    ".btn{display:inline-block;background:#ff6a00;color:#0b0b0d;border:none;border-radius:6px;padding:9px 16px;font-weight:700;cursor:pointer;font-size:.85rem;margin:0 6px 6px 0;text-decoration:none}" +
+    ".stat{background:linear-gradient(165deg,#1e1a25,#17141c);border:1px solid #2a2432;border-radius:14px;padding:18px;text-align:center}" +
+    ".stat b{display:block;font-size:1.7rem;color:#a78bfa;font-weight:900}" +
+    ".stat span{color:#8e8a99;font-size:.75rem;text-transform:uppercase;letter-spacing:1px}" +
+    ".card{background:linear-gradient(165deg,#1e1a25,#17141c);border:1px solid #2a2432;border-radius:14px;padding:20px;margin-bottom:16px}" +
+    ".btn{display:inline-block;background:linear-gradient(180deg,#a78bfa,#8b5cf6);color:#0b0b0d;border:none;border-radius:8px;padding:10px 17px;font-weight:800;cursor:pointer;font-size:.85rem;margin:0 6px 6px 0;text-decoration:none}" +
     ".btn.sec{background:transparent;border:1px solid #555;color:#bbb}" +
     ".btn.refuse{background:#c0392b;color:#fff}" +
     ".btn.ok{background:#2ecc71;color:#0b0b0d}" +
@@ -481,7 +484,7 @@ function pageHtml(titre, corps) {
     ".b-attente{background:rgba(255,170,0,.15);color:#ffaa00}" +
     ".b-accepte{background:rgba(46,204,113,.15);color:#2ecc71}" +
     ".b-refuse{background:rgba(192,57,43,.15);color:#e74c3c}" +
-    "input,select{width:100%;padding:10px;border-radius:7px;border:1px solid #2a2a2e;background:#0b0b0d;color:#fff;box-sizing:border-box;margin-bottom:10px;font-family:inherit}" +
+    "input,select{width:100%;padding:10px;border-radius:9px;border:1px solid #2a2432;background:#0b0a0d;color:#fff;box-sizing:border-box;margin-bottom:10px;font-family:inherit}" +
     ".row{display:flex;gap:16px;flex-wrap:wrap} .row>div{flex:1;min-width:260px}" +
     "</style></head><body><div class='wrap'>" + corps + "</div></body></html>"
   );
@@ -507,6 +510,14 @@ function renderDashboard() {
     "<div class='stat'><b>" + ref + "</b><span>Refusées</span></div>" +
     "<div class='stat'><b>" + actifs + "/" + (data.effectif || []).length + "</b><span>Effectif actif</span></div>" +
     "<div class='stat'><b>" + (data.ouvert ? "OUVERT" : "FERMÉ") + "</b><span>Garage</span></div>" +
+    "</div>" +
+    "<div class='card'><h2>📢 Recrutement</h2>" +
+    "<p class='muted'>Choisis si le garage recrute en ce moment. Le site affichera l'information.</p>" +
+    "<p style='margin:10px 0'>Statut actuel : <b>" + (data.recrutement !== false ? "OUVERT ✅" : "FERMÉ ❌") + "</b></p>" +
+    "<form method='POST' action='/staff/recrutement' style='display:inline'>" +
+    "<input type='hidden' name='etat' value='ouvert'><button class='btn ok' type='submit'>✅ Recrutement ouvert</button></form>" +
+    "<form method='POST' action='/staff/recrutement' style='display:inline'>" +
+    "<input type='hidden' name='etat' value='ferme'><button class='btn refuse' type='submit'>❌ Recrutement fermé</button></form>" +
     "</div>" +
     "<div class='card'><h2>🚦 Contrôle du garage</h2>" +
     "<form method='POST' action='/staff/garage' style='display:inline'>" +
@@ -538,7 +549,7 @@ function renderDashboard() {
         ? "<span class='badge b-refuse'>Refusé</span>"
         : "<span class='badge b-attente'>En attente</span>";
     html +=
-      "<div style='border-bottom:1px solid #2a2a2e;padding:12px 0'><b>" +
+      "<div style='border-bottom:1px solid #2a2432;padding:12px 0'><b>" +
       (c.nom_rp || "Sans nom") + "</b> — " + (c.poste || "?") + " " + statut +
       "<br><span class='muted'>Discord : " + (c.discord || "-") + " • Âge : " + (c.age || "-") + "</span>" +
       (c.motivation ? "<br><span class='muted'>" + c.motivation + "</span>" : "") +
@@ -559,7 +570,7 @@ function renderDashboard() {
   data.effectif.forEach((m, i) => {
     const options = POSTES.map((g) => "<option value='" + g + "'" + (g === m.grade ? " selected" : "") + ">" + g + "</option>").join("");
     html +=
-      "<form method='POST' action='/staff/grade' style='display:flex;gap:8px;align-items:center;border-bottom:1px solid #2a2a2e;padding:10px 0;flex-wrap:wrap'>" +
+      "<form method='POST' action='/staff/grade' style='display:flex;gap:8px;align-items:center;border-bottom:1px solid #2a2432;padding:10px 0;flex-wrap:wrap'>" +
       "<input type='hidden' name='index' value='" + i + "'>" +
       "<span style='flex:1;min-width:150px'>" + m.nom + (m.actif ? "" : " <span class='badge b-refuse'>Inactif</span>") + "</span>" +
       "<select name='grade' style='max-width:200px;margin:0'>" + options + "</select>" +
@@ -569,7 +580,7 @@ function renderDashboard() {
       "<form method='POST' action='/staff/retirer'><input type='hidden' name='index' value='" + i + "'><button class='btn refuse' type='submit'>Retirer</button></form></div>";
   });
   html +=
-    "<div style='margin-top:14px;padding-top:14px;border-top:1px solid #2a2a2e'>" +
+    "<div style='margin-top:14px;padding-top:14px;border-top:1px solid #2a2432'>" +
     "<form method='POST' action='/staff/membre' style='display:flex;gap:8px'>" +
     "<input type='text' name='nom' placeholder='Nom du nouveau membre' required>" +
     "<select name='grade' style='max-width:200px'>" + POSTES.map((g) => "<option value='" + g + "'>" + g + "</option>").join("") + "</select>" +
@@ -586,7 +597,7 @@ function renderDashboard() {
     "<input type='text' name='meilleureSatisfaction' placeholder='⭐ Meilleure satisfaction client' value='" + (mvp.meilleureSatisfaction || "") + "'>" +
     "<button class='btn' type='submit'>Enregistrer</button></form>";
   html +=
-    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2e'><p class='muted'>Publier cette mise en avant sur le site web Benny's.</p>" +
+    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2432'><p class='muted'>Publier cette mise en avant sur le site web Benny's.</p>" +
     "<form method='POST' action='/staff/publier-mise-en-avant'><button class='btn ok' type='submit'>📤 Publier sur le site</button></form>" +
     "<p class='muted' style='margin-top:8px'>Dernière publication : " + (data.miseEnAvantPublieeLe || "jamais") + "</p></div></div>";
 
@@ -600,7 +611,7 @@ function renderDashboard() {
     "<form method='POST' action='/staff/tarif' style='display:flex;gap:8px;margin-top:12px'><input type='hidden' name='index' value='new'>" +
     "<input type='text' name='nom' placeholder='Nouvelle prestation'><input type='text' name='prix' placeholder='Prix' style='max-width:130px'><button class='btn' type='submit'>Ajouter</button></form>";
   html +=
-    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2e'><p class='muted'>Publier ces tarifs sur le site web Benny's.</p>" +
+    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2432'><p class='muted'>Publier ces tarifs sur le site web Benny's.</p>" +
     "<form method='POST' action='/staff/publier-tarifs'><button class='btn ok' type='submit'>📤 Publier les tarifs sur le site</button></form>" +
     "<p class='muted' style='margin-top:8px'>Dernière publication : " + (data.tarifsPubliesLe || "jamais") + "</p></div></div>";
 
@@ -614,7 +625,7 @@ function renderDashboard() {
     "<form method='POST' action='/staff/partenaire' style='display:flex;gap:8px;margin-top:12px'><input type='hidden' name='index' value='new'>" +
     "<input type='text' name='nom' placeholder='Nouveau partenaire'><input type='text' name='desc' placeholder='Description'><button class='btn' type='submit'>Ajouter</button></form>";
   html +=
-    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2e'><p class='muted'>Publier ces partenaires sur le site web Benny's.</p>" +
+    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2432'><p class='muted'>Publier ces partenaires sur le site web Benny's.</p>" +
     "<form method='POST' action='/staff/publier-partenaires'><button class='btn ok' type='submit'>📤 Publier les partenaires sur le site</button></form>" +
     "<p class='muted' style='margin-top:8px'>Dernière publication : " + (data.partenairesPubliesLe || "jamais") + "</p></div></div>";
 
@@ -657,6 +668,7 @@ const server = http.createServer(async (req, res) => {
         miseEnAvant: data.miseEnAvant || {},
         effectif: (data.effectif || []).map((m) => ({ nom: m.nom, grade: m.grade, actif: m.actif !== false })),
         ouvert: !!data.ouvert,
+        recrutement: data.recrutement !== false,
         tarifsPubliesLe: data.tarifsPubliesLe || "jamais",
         partenairesPubliesLe: data.partenairesPubliesLe || "jamais",
         miseEnAvantPublieeLe: data.miseEnAvantPublieeLe || "jamais",
@@ -699,7 +711,7 @@ const server = http.createServer(async (req, res) => {
                 embeds: [
                   new EmbedBuilder()
                     .setTitle("🔧 Nouvelle candidature Benny's")
-                    .setColor(0xff6a00)
+                    .setColor(0x8b5cf6)
                     .addFields(
                       { name: "Nom RP", value: nomRp, inline: true },
                       { name: "Discord", value: disc, inline: true },
@@ -757,6 +769,7 @@ const server = http.createServer(async (req, res) => {
     "/staff/membre",
     "/staff/mise-en-avant",
     "/staff/publier-mise-en-avant",
+    "/staff/recrutement",
   ];
 
   if (req.method === "POST" && actions.indexOf(url) !== -1) {
@@ -842,6 +855,12 @@ const server = http.createServer(async (req, res) => {
           if (!isNaN(idx) && data.partenaires[idx]) data.partenaires[idx] = [nom, desc];
         }
         saveData(data);
+      }
+
+      if (url === "/staff/recrutement") {
+        data.recrutement = params.get("etat") === "ouvert";
+        saveData(data);
+        await log("📢 Recrutement " + (data.recrutement ? "OUVERT" : "FERMÉ") + " depuis le dashboard");
       }
 
       if (url === "/staff/garage") {
@@ -932,7 +951,7 @@ const server = http.createServer(async (req, res) => {
     pageHtml(
       "Bot Benny's",
       "<h1>🔧 Bot Benny's</h1><div class='card'><b>Bot Benny's en ligne ✅</b>" +
-        "<p class='muted'>Tableau de bord : <a href='/staff' style='color:#ff6a00'>/staff</a></p></div>"
+        "<p class='muted'>Tableau de bord : <a href='/staff' style='color:#a78bfa'>/staff</a></p></div>"
     )
   );
 });
@@ -943,7 +962,6 @@ client.once("ready", async () => {
   botReady = true;
   botTag = client.user.tag;
 
-  // Restaurer les donnees sauvegardees sur GitHub
   try {
     const distant = await githubLoad();
     if (distant && typeof distant === "object") {
