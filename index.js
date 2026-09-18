@@ -87,7 +87,7 @@ const DEFAULT_DATA = {
   effectif: [],
   candidatures: {},
   miseEnAvant: {
-    employeMois: "",
+    employeSemaine: "",
     meilleurMecano: "",
     meilleurDepanneur: "",
     meilleureSatisfaction: "",
@@ -134,6 +134,10 @@ function loadData() {
   }
   if (!data.miseEnAvant || typeof data.miseEnAvant !== "object") {
     data.miseEnAvant = DEFAULT_DATA.miseEnAvant;
+  }
+  // Migration : employeMois -> employeSemaine
+  if (data.miseEnAvant.employeMois !== undefined && data.miseEnAvant.employeSemaine === undefined) {
+    data.miseEnAvant.employeSemaine = data.miseEnAvant.employeMois;
   }
   return data;
 }
@@ -340,7 +344,7 @@ client.on("interactionCreate", async (interaction) => {
   if (cmd === "mise-en-avant") {
     const mvp = data.miseEnAvant || {};
     const lignes = [];
-    if (mvp.employeMois) lignes.push("👑 **Employé du mois** : " + mvp.employeMois);
+    if (mvp.employeSemaine) lignes.push("👑 **Employé de la semaine** : " + mvp.employeSemaine);
     if (mvp.meilleurMecano) lignes.push("🔧 **Meilleur mécanicien** : " + mvp.meilleurMecano);
     if (mvp.meilleurDepanneur) lignes.push("🚗 **Meilleur dépanneur** : " + mvp.meilleurDepanneur);
     if (mvp.meilleureSatisfaction) lignes.push("⭐ **Meilleure satisfaction client** : " + mvp.meilleureSatisfaction);
@@ -576,7 +580,7 @@ function renderDashboard() {
   html += "<div class='card'><h2>🏆 Mise en avant des employés</h2>";
   html +=
     "<form method='POST' action='/staff/mise-en-avant'>" +
-    "<input type='text' name='employeMois' placeholder='👑 Employé du mois' value='" + (mvp.employeMois || "") + "'>" +
+    "<input type='text' name='employeSemaine' placeholder='👑 Employé de la semaine' value='" + (mvp.employeSemaine || "") + "'>" +
     "<input type='text' name='meilleurMecano' placeholder='🔧 Meilleur mécanicien' value='" + (mvp.meilleurMecano || "") + "'>" +
     "<input type='text' name='meilleurDepanneur' placeholder='🚗 Meilleur dépanneur' value='" + (mvp.meilleurDepanneur || "") + "'>" +
     "<input type='text' name='meilleureSatisfaction' placeholder='⭐ Meilleure satisfaction client' value='" + (mvp.meilleureSatisfaction || "") + "'>" +
@@ -894,7 +898,7 @@ const server = http.createServer(async (req, res) => {
 
       if (url === "/staff/mise-en-avant") {
         data.miseEnAvant = {
-          employeMois: params.get("employeMois") || "",
+          employeSemaine: params.get("employeSemaine") || "",
           meilleurMecano: params.get("meilleurMecano") || "",
           meilleurDepanneur: params.get("meilleurDepanneur") || "",
           meilleureSatisfaction: params.get("meilleureSatisfaction") || "",
