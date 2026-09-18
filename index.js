@@ -1,7 +1,7 @@
 // ============================================================
 //  BOT DISCORD BENNY'S
 //  Dashboard + sauvegarde GitHub + grades + mise en avant
-//  + statut de recrutement + theme violet
+//  + statut de recrutement + nouvelles commandes utiles
 // ============================================================
 
 const fs = require("fs");
@@ -297,11 +297,51 @@ const commands = [
   new SlashCommandBuilder().setName("ferme").setDescription("Fermer le garage"),
   new SlashCommandBuilder().setName("recrutement").setDescription("Etat du recrutement"),
   new SlashCommandBuilder().setName("effectif").setDescription("Voir l'effectif"),
+  new SlashCommandBuilder().setName("service").setDescription("Voir qui est en service"),
   new SlashCommandBuilder().setName("stats").setDescription("Statistiques du garage"),
   new SlashCommandBuilder().setName("partenaires").setDescription("Liste des partenaires"),
   new SlashCommandBuilder().setName("tarifs").setDescription("Tarifs du garage"),
   new SlashCommandBuilder().setName("dashboard").setDescription("Lien du tableau de bord web (staff)"),
   new SlashCommandBuilder().setName("mise-en-avant").setDescription("Afficher les employés mis en avant"),
+  new SlashCommandBuilder()
+    .setName("recrue")
+    .setDescription("Ajouter un membre à l'effectif (staff)")
+    .addUserOption((o) =>
+      o.setName("membre").setDescription("Le joueur à ajouter").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o
+        .setName("grade")
+        .setDescription("Son grade")
+        .setRequired(true)
+        .addChoices(...POSTES.map((p) => ({ name: p, value: p })))
+    ),
+  new SlashCommandBuilder()
+    .setName("promouvoir")
+    .setDescription("Changer le grade d'un membre (staff)")
+    .addStringOption((o) =>
+      o.setName("nom").setDescription("Nom RP du membre").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o
+        .setName("grade")
+        .setDescription("Nouveau grade")
+        .setRequired(true)
+        .addChoices(...POSTES.map((p) => ({ name: p, value: p })))
+    ),
+  new SlashCommandBuilder()
+    .setName("renvoyer")
+    .setDescription("Retirer un membre de l'effectif (staff)")
+    .addStringOption((o) =>
+      o.setName("nom").setDescription("Nom RP du membre").setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName("annonce")
+    .setDescription("Publier une annonce Benny's (staff)")
+    .addStringOption((o) =>
+      o.setName("message").setDescription("Le texte de l'annonce").setRequired(true)
+    )
+    .addStringOption((o) => o.setName("titre").setDescription("Titre de l'annonce")),
   new SlashCommandBuilder()
     .setName("joueur")
     .setDescription("Marquer un joueur en service")
@@ -394,6 +434,22 @@ client.on("interactionCreate", async (interaction) => {
       ],
     });
   }
+  if (cmd === "service") {
+    const actifs = data.effectif.filter((m) => m.actif !== false);
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🔧 En service chez Benny's")
+          .setColor(0x8b5cf6)
+          .setDescription(
+            actifs.length
+              ? actifs.map((m) => "• **" + m.nom + "** — " + m.grade).join("\n")
+              : "Aucun membre en service pour le moment."
+          )
+          .addFields({ name: "Garage", value: data.ouvert ? "🟢 Ouvert" : "🔴 Fermé", inline: true }),
+      ],
+    });
+  }
   if (cmd === "stats") {
     const list = Object.values(data.candidatures);
     const acc = list.filter((c) => c.statut === "accepte").length;
@@ -435,6 +491,98 @@ client.on("interactionCreate", async (interaction) => {
           .addFields(...data.tarifs.map((t) => ({ name: t[0], value: t[1], inline: true }))),
       ],
     });
+  }
+  if (cmd === "recrue") {
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
+    }
+    const m = interaction.options.getUser("membre");
+    const grade = interaction.options.getString("grade");
+    const dejaLa = data.effectif.some(
+      (x) => x.nom && x.nom.toLowerCase() === m.username.toLowerCase()
+    );
+    if (dejaLa) {
+      return interaction.reply({ content: "⚠️ " + m + " est déjà dans l'effectif.", ephemeral: true });
+    }
+    data.effectif.push({ nom: m.username, grade: grade, actif: true });
+    saveData(data);
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("✅ Nouvelle recrue")
+          .setColor(0x8b5cf6)
+          .setDescription(m + " rejoint l'équipe Benny's en tant que **" + grade + "**.")
+          .setFooter({ text: "Ajouté par " + interaction.user.tag }),
+      ],
+    });
+    return log("✅ " + m.tag + " ajouté à l'effectif (" + grade + ") par " + interaction.user.tag);
+  }
+  if (cmd === "renvoyer") {
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
+    }
+    const nom = interaction.options.getString("nom");
+    const idx = data.effectif.findIndex(
+      (x) => x.nom && x.nom.toLowerCase().indexOf(nom.toLowerCase()) !== -1
+    );
+    if (idx === -1) {
+      return interaction.reply({ content: "❌ Aucun membre trouvé pour « " + nom + " ».", ephemeral: true });
+    }
+    const retire = data.effectif.splice(idx, 1)[0];
+    saveData(data);
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("❌ Membre retiré")
+          .setColor(0xc0392b)
+          .setDescription("**" + retire.nom + "** (" + retire.grade + ") a été retiré de l'effectif.")
+          .setFooter({ text: "Par " + interaction.user.tag }),
+      ],
+    });
+    return log("➖ " + retire.nom + " retiré de l'effectif par " + interaction.user.tag);
+  }
+  if (cmd === "promouvoir") {
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
+    }
+    const nom = interaction.options.getString("nom");
+    const grade = interaction.options.getString("grade");
+    const membre = data.effectif.find(
+      (x) => x.nom && x.nom.toLowerCase().indexOf(nom.toLowerCase()) !== -1
+    );
+    if (!membre) {
+      return interaction.reply({ content: "❌ Aucun membre trouvé pour « " + nom + " ».", ephemeral: true });
+    }
+    const ancien = membre.grade;
+    membre.grade = grade;
+    saveData(data);
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🎖 Changement de grade")
+          .setColor(0x8b5cf6)
+          .setDescription("**" + membre.nom + "** : " + ancien + " → **" + grade + "**")
+          .setFooter({ text: "Par " + interaction.user.tag }),
+      ],
+    });
+    return log("🎖 " + membre.nom + " : " + ancien + " → " + grade + " par " + interaction.user.tag);
+  }
+  if (cmd === "annonce") {
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
+    }
+    const texte = interaction.options.getString("message");
+    const titre = interaction.options.getString("titre") || "📢 Annonce Benny's";
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(titre)
+          .setColor(0x8b5cf6)
+          .setDescription(texte)
+          .setFooter({ text: "Benny's Original Motor Works" }),
+      ],
+    });
+    return log("📢 Annonce publiée par " + interaction.user.tag);
   }
   if (cmd === "joueur") {
     const m = interaction.options.getUser("membre");
