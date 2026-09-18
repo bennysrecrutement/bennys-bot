@@ -1,4 +1,7 @@
-// Serveur qui sert le site public avec les tarifs publies
+// ============================================================
+//  BOT DISCORD BENNY'S — Dashboard + synchronisation du site
+// ============================================================
+
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
@@ -16,7 +19,6 @@ const {
   ActivityType,
 } = require("discord.js");
 
-// --- CONFIG -------------------------------------------------
 const TOKEN = (process.env.DISCORD_TOKEN || "").trim().replace(/^["']|["']$/g, "");
 const GUILD_ID = (process.env.GUILD_ID || "0").trim();
 const SALON_CANDIDATURES_ID = (process.env.SALON_CANDIDATURES_ID || "0").trim();
@@ -32,6 +34,7 @@ const DEFAULT_DATA = {
   effectif: [],
   candidatures: {},
   tarifsPubliesLe: "jamais",
+  partenairesPubliesLe: "jamais",
   tarifs: [
     ["Réparation", "1000$"],
     ["Dépannage Sud", "1000$"],
@@ -96,19 +99,6 @@ async function log(texte) {
   } catch {}
 }
 
-function candidatureButtons(candidatId) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("accept_" + candidatId)
-      .setLabel("✅ Accepter")
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId("refuse_" + candidatId)
-      .setLabel("❌ Refuser")
-      .setStyle(ButtonStyle.Danger)
-  );
-}
-
 function hasPermission(member) {
   if (!ROLE_RECRUTEUR_ID || ROLE_RECRUTEUR_ID === "0") return true;
   if (!member || !member.roles) return false;
@@ -168,9 +158,6 @@ async function traiterCandidature(candidatId, accepter, guild) {
   return { nomRp, poste, mpOk };
 }
 
-// ============================================================
-//  DISCORD
-// ============================================================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
@@ -237,7 +224,12 @@ const commands = [
     .setName("clear")
     .setDescription("Supprimer des messages de ce salon (staff)")
     .addIntegerOption((o) =>
-      o.setName("nombre").setDescription("Nombre de messages a supprimer (1-100)").setMinValue(1).setMaxValue(100).setRequired(true)
+      o
+        .setName("nombre")
+        .setDescription("Nombre de messages a supprimer (1-100)")
+        .setMinValue(1)
+        .setMaxValue(100)
+        .setRequired(true)
     ),
 ].map((c) => c.toJSON());
 
@@ -272,13 +264,16 @@ client.on("interactionCreate", async (interaction) => {
           .setTitle("🔧 Recrutement Benny's")
           .setColor(0xff6a00)
           .setDescription(
-            "Postes ouverts :\n" + POSTES.map((p) => "• " + p).join("\n") + "\n\n👉 Candidature sur le site web de Benny's."
+            "Postes ouverts :\n" +
+              POSTES.map((p) => "• " + p).join("\n") +
+              "\n\n👉 Candidature sur le site web de Benny's."
           ),
       ],
     });
   }
   if (cmd === "effectif") {
-    if (!data.effectif.length) return interaction.reply({ content: "Effectif vide.", ephemeral: true });
+    if (!data.effectif.length)
+      return interaction.reply({ content: "Effectif vide.", ephemeral: true });
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
@@ -350,7 +345,7 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // ============================================================
-//  WEB : dashboard + site public + export tarifs
+//  WEB
 // ============================================================
 function pageHtml(titre, corps) {
   return (
@@ -465,7 +460,7 @@ function renderDashboard() {
     "<form method='POST' action='/staff/tarif' style='display:flex;gap:8px;margin-top:12px'><input type='hidden' name='index' value='new'>" +
     "<input type='text' name='nom' placeholder='Nouvelle prestation'><input type='text' name='prix' placeholder='Prix' style='max-width:130px'><button class='btn' type='submit'>Ajouter</button></form>";
   html +=
-    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2e'><p class='muted'>Publier ces tarifs sur le site web Benny's (la page publique se met a jour).</p>" +
+    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2e'><p class='muted'>Publier ces tarifs sur le site web Benny's.</p>" +
     "<form method='POST' action='/staff/publier-tarifs'><button class='btn ok' type='submit'>📤 Publier les tarifs sur le site</button></form>" +
     "<p class='muted' style='margin-top:8px'>Dernière publication : " + (data.tarifsPubliesLe || "jamais") + "</p></div></div>";
 
@@ -477,7 +472,11 @@ function renderDashboard() {
   });
   html +=
     "<form method='POST' action='/staff/partenaire' style='display:flex;gap:8px;margin-top:12px'><input type='hidden' name='index' value='new'>" +
-    "<input type='text' name='nom' placeholder='Nouveau partenaire'><input type='text' name='desc' placeholder='Description'><button class='btn' type='submit'>Ajouter</button></form></div>";
+    "<input type='text' name='nom' placeholder='Nouveau partenaire'><input type='text' name='desc' placeholder='Description'><button class='btn' type='submit'>Ajouter</button></form>";
+  html +=
+    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2e'><p class='muted'>Publier ces partenaires sur le site web Benny's.</p>" +
+    "<form method='POST' action='/staff/publier-partenaires'><button class='btn ok' type='submit'>📤 Publier les partenaires sur le site</button></form>" +
+    "<p class='muted' style='margin-top:8px'>Dernière publication : " + (data.partenairesPubliesLe || "jamais") + "</p></div></div>";
 
   return pageHtml("Dashboard Benny's", html);
 }
@@ -504,14 +503,21 @@ function isLogged(req) {
 const server = http.createServer(async (req, res) => {
   const url = req.url.split("?")[0];
 
-  // --- Export des tarifs pour le site public (CORS ouvert) ---
+  // --- Export pour le site public ---
   if (url === "/api/tarifs") {
     const data = loadData();
     res.writeHead(200, {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
     });
-    return res.end(JSON.stringify({ tarifs: data.tarifs, partenaires: data.partenaires, publieLe: data.tarifsPubliesLe }));
+    return res.end(
+      JSON.stringify({
+        tarifs: data.tarifs,
+        partenaires: data.partenaires,
+        tarifsPubliesLe: data.tarifsPubliesLe || "jamais",
+        partenairesPubliesLe: data.partenairesPubliesLe || "jamais",
+      })
+    );
   }
 
   // --- Candidatures du site ---
@@ -601,6 +607,7 @@ const server = http.createServer(async (req, res) => {
     "/staff/partenaire",
     "/staff/garage",
     "/staff/publier-tarifs",
+    "/staff/publier-partenaires",
   ];
 
   if (req.method === "POST" && actions.indexOf(url) !== -1) {
@@ -639,7 +646,10 @@ const server = http.createServer(async (req, res) => {
             if (data.effectif.indexOf(entry) === -1) data.effectif.push(entry);
           }
           saveData(data);
-          await log("Candidature de " + (c.nom_rp || "candidat") + (decision === "accepte" ? " acceptée" : " refusée") + " depuis le dashboard");
+          await log(
+            "Candidature de " + (c.nom_rp || "candidat") +
+              (decision === "accepte" ? " acceptée" : " refusée") + " depuis le dashboard"
+          );
         }
       }
 
@@ -692,6 +702,12 @@ const server = http.createServer(async (req, res) => {
         data.tarifsPubliesLe = new Date().toLocaleString("fr-FR");
         saveData(data);
         await log("📤 Tarifs publiés sur le site (" + data.tarifsPubliesLe + ")");
+      }
+
+      if (url === "/staff/publier-partenaires") {
+        data.partenairesPubliesLe = new Date().toLocaleString("fr-FR");
+        saveData(data);
+        await log("📤 Partenaires publiés sur le site (" + data.partenairesPubliesLe + ")");
       }
 
       res.writeHead(302, { Location: "/staff" });
