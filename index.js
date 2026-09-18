@@ -1,7 +1,4 @@
-// ============================================================
-//  BOT DISCORD BENNY'S — Dashboard complet (/staff)
-// ============================================================
-
+// Serveur qui sert le site public avec les tarifs publies
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
@@ -34,6 +31,7 @@ const DEFAULT_DATA = {
   ouvert: false,
   effectif: [],
   candidatures: {},
+  tarifsPubliesLe: "jamais",
   tarifs: [
     ["Réparation", "1000$"],
     ["Dépannage Sud", "1000$"],
@@ -50,8 +48,7 @@ function loadData() {
   let data = Object.assign({}, DEFAULT_DATA);
   if (fs.existsSync(DATA_FILE)) {
     try {
-      const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
-      data = Object.assign(data, saved);
+      data = Object.assign(data, JSON.parse(fs.readFileSync(DATA_FILE, "utf-8")));
     } catch {}
   }
   if (!Array.isArray(data.tarifs) || !data.tarifs.length) data.tarifs = DEFAULT_DATA.tarifs;
@@ -147,30 +144,23 @@ async function traiterCandidature(candidatId, accepter, guild) {
     }
     if (candidature) candidature.statut = "accepte";
     saveData(data);
-
     if (membre) {
       mpOk = await sendDM(
         membre.user,
-        "🎉 **Félicitations !**\n" +
-          "Ta candidature chez **Benny's Original Motor Works** pour le poste de **" +
+        "🎉 **Félicitations !**\nTa candidature chez **Benny's Original Motor Works** pour le poste de **" +
           poste +
-          "** a été **retenue**.\n" +
-          "Un membre de la direction va te contacter très vite. Bienvenue ! 🔧"
+          "** a été **retenue**.\nUn membre de la direction va te contacter très vite. Bienvenue ! 🔧"
       );
     }
   } else {
     if (candidature) candidature.statut = "refuse";
     saveData(data);
-
     if (membre) {
       mpOk = await sendDM(
         membre.user,
-        "❌ **Candidature non retenue**\n" +
-          "Après étude de ton dossier, ta candidature chez **Benny's Original Motor Works** " +
-          "pour le poste de **" +
+        "❌ **Candidature non retenue**\nTa candidature chez **Benny's Original Motor Works** pour le poste de **" +
           poste +
-          "** n'a pas été retenue.\n" +
-          "Tu pourras retenter ta chance plus tard. Merci ! 🔧"
+          "** n'a pas été retenue.\nTu pourras retenter ta chance plus tard. Merci ! 🔧"
       );
     }
   }
@@ -222,9 +212,11 @@ client.on("interactionCreate", async (interaction) => {
   });
   await log(
     (action === "accept" ? "✅ " : "❌ ") +
-      "Candidature de " + res.nomRp +
+      "Candidature de " +
+      res.nomRp +
       (action === "accept" ? " acceptée" : " refusée") +
-      " par " + interaction.user.tag
+      " par " +
+      interaction.user.tag
   );
 });
 
@@ -245,12 +237,7 @@ const commands = [
     .setName("clear")
     .setDescription("Supprimer des messages de ce salon (staff)")
     .addIntegerOption((o) =>
-      o
-        .setName("nombre")
-        .setDescription("Nombre de messages a supprimer (1-100)")
-        .setMinValue(1)
-        .setMaxValue(100)
-        .setRequired(true)
+      o.setName("nombre").setDescription("Nombre de messages a supprimer (1-100)").setMinValue(1).setMaxValue(100).setRequired(true)
     ),
 ].map((c) => c.toJSON());
 
@@ -274,26 +261,24 @@ client.on("interactionCreate", async (interaction) => {
   if (cmd === "dashboard") {
     return interaction.reply({
       content:
-        "📊 **Tableau de bord Benny's**\n" +
-        "https://bennys-bot-production.up.railway.app/staff\n" +
-        "_(accès protégé par mot de passe)_",
+        "📊 **Tableau de bord Benny's**\nhttps://bennys-bot-production.up.railway.app/staff\n_(accès protégé par mot de passe)_",
       ephemeral: true,
     });
   }
   if (cmd === "recrutement") {
-    const embed = new EmbedBuilder()
-      .setTitle("🔧 Recrutement Benny's")
-      .setColor(0xff6a00)
-      .setDescription(
-        "Postes ouverts :\n" +
-          POSTES.map((p) => "• " + p).join("\n") +
-          "\n\n👉 Candidature sur le site web de Benny's."
-      );
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🔧 Recrutement Benny's")
+          .setColor(0xff6a00)
+          .setDescription(
+            "Postes ouverts :\n" + POSTES.map((p) => "• " + p).join("\n") + "\n\n👉 Candidature sur le site web de Benny's."
+          ),
+      ],
+    });
   }
   if (cmd === "effectif") {
-    if (!data.effectif.length)
-      return interaction.reply({ content: "Effectif vide.", ephemeral: true });
+    if (!data.effectif.length) return interaction.reply({ content: "Effectif vide.", ephemeral: true });
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
@@ -350,29 +335,22 @@ client.on("interactionCreate", async (interaction) => {
   }
   if (cmd === "clear") {
     if (!hasPermission(interaction.member)) {
-      return interaction.reply({
-        content: "❌ Tu n'as pas la permission d'utiliser cette commande.",
-        ephemeral: true,
-      });
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
     }
     const nombre = interaction.options.getInteger("nombre");
     try {
       await interaction.deferReply({ ephemeral: true });
       const supprimes = await interaction.channel.bulkDelete(nombre, true);
       await interaction.editReply("🧹 " + supprimes.size + " message(s) supprimé(s).");
-      return log(
-        "🧹 " + supprimes.size + " messages supprimés dans #" + interaction.channel.name + " par " + interaction.user.tag
-      );
+      return log("🧹 " + supprimes.size + " messages supprimés dans #" + interaction.channel.name);
     } catch (e) {
-      return interaction.editReply(
-        "❌ Suppression impossible : " + e.message + "\n(Les messages de plus de 14 jours ne peuvent pas être supprimés en masse.)"
-      );
+      return interaction.editReply("❌ Suppression impossible : " + e.message);
     }
   }
 });
 
 // ============================================================
-//  DASHBOARD WEB
+//  WEB : dashboard + site public + export tarifs
 // ============================================================
 function pageHtml(titre, corps) {
   return (
@@ -415,7 +393,6 @@ function renderDashboard() {
     "<div class='top'><div><h1>🔧 Tableau de bord — Benny's</h1>" +
     "<p class='muted'>Bot : " + botTag + " • " + (botReady ? "connecté ✅" : "hors ligne ⚠️") + "</p></div>" +
     "<div><a class='btn sec' href='/staff'>Rafraîchir</a><a class='btn sec' href='/staff/logout'>Déconnexion</a></div></div>" +
-
     "<div class='grid'>" +
     "<div class='stat'><b>" + liste.length + "</b><span>Candidatures</span></div>" +
     "<div class='stat'><b>" + att + "</b><span>En attente</span></div>" +
@@ -424,14 +401,12 @@ function renderDashboard() {
     "<div class='stat'><b>" + data.effectif.length + "</b><span>Effectif</span></div>" +
     "<div class='stat'><b>" + (data.ouvert ? "OUVERT" : "FERMÉ") + "</b><span>Garage</span></div>" +
     "</div>" +
-
     "<div class='card'><h2>🚦 Contrôle du garage</h2>" +
     "<form method='POST' action='/staff/garage' style='display:inline'>" +
     "<input type='hidden' name='etat' value='ouvert'><button class='btn ok' type='submit'>🟢 Ouvrir le garage</button></form>" +
     "<form method='POST' action='/staff/garage' style='display:inline'>" +
     "<input type='hidden' name='etat' value='ferme'><button class='btn refuse' type='submit'>🔴 Fermer le garage</button></form>" +
     "</div>" +
-
     "<div class='card'><h2>➕ Ajouter une candidature à la main</h2>" +
     "<form method='POST' action='/staff/ajouter'>" +
     "<div class='row'><div><input type='text' name='nom_rp' placeholder='Nom / Prénom RP' required>" +
@@ -455,29 +430,19 @@ function renderDashboard() {
         : c.statut === "refuse"
         ? "<span class='badge b-refuse'>Refusé</span>"
         : "<span class='badge b-attente'>En attente</span>";
-
     html +=
-      "<div style='border-bottom:1px solid #2a2a2e;padding:12px 0'>" +
-      "<b>" + (c.nom_rp || "Sans nom") + "</b> — " + (c.poste || "?") + " " + statut +
+      "<div style='border-bottom:1px solid #2a2a2e;padding:12px 0'><b>" +
+      (c.nom_rp || "Sans nom") + "</b> — " + (c.poste || "?") + " " + statut +
       "<br><span class='muted'>Discord : " + (c.discord || "-") + " • Âge : " + (c.age || "-") + "</span>" +
-      (c.motivation ? "<br><span class='muted'>" + c.motivation + "</span>" : "");
-
-    html += "<div style='margin-top:8px'>";
+      (c.motivation ? "<br><span class='muted'>" + c.motivation + "</span>" : "") +
+      "<div style='margin-top:8px'>";
     if (c.statut === "en_attente") {
       html +=
-        "<form method='POST' action='/staff/decision' style='display:inline'>" +
-        "<input type='hidden' name='id' value='" + id + "'>" +
-        "<input type='hidden' name='decision' value='accepte'>" +
-        "<button class='btn ok' type='submit'>✅ Accepter</button></form>" +
-        "<form method='POST' action='/staff/decision' style='display:inline'>" +
-        "<input type='hidden' name='id' value='" + id + "'>" +
-        "<input type='hidden' name='decision' value='refuse'>" +
-        "<button class='btn refuse' type='submit'>❌ Refuser</button></form>";
+        "<form method='POST' action='/staff/decision' style='display:inline'><input type='hidden' name='id' value='" + id + "'><input type='hidden' name='decision' value='accepte'><button class='btn ok' type='submit'>✅ Accepter</button></form>" +
+        "<form method='POST' action='/staff/decision' style='display:inline'><input type='hidden' name='id' value='" + id + "'><input type='hidden' name='decision' value='refuse'><button class='btn refuse' type='submit'>❌ Refuser</button></form>";
     }
     html +=
-      "<form method='POST' action='/staff/supprimer' style='display:inline'>" +
-      "<input type='hidden' name='id' value='" + id + "'>" +
-      "<button class='btn sec' type='submit'>🗑 Supprimer</button></form></div></div>";
+      "<form method='POST' action='/staff/supprimer' style='display:inline'><input type='hidden' name='id' value='" + id + "'><button class='btn sec' type='submit'>🗑 Supprimer</button></form></div></div>";
   }
   html += "</div>";
 
@@ -485,45 +450,34 @@ function renderDashboard() {
   if (!data.effectif.length) html += "<p class='muted'>Aucun membre enregistré.</p>";
   data.effectif.forEach((m, i) => {
     html +=
-      "<div style='border-bottom:1px solid #2a2a2e;padding:8px 0;display:flex;justify-content:space-between;align-items:center'>" +
-      "<span>" + m + "</span>" +
-      "<form method='POST' action='/staff/retirer'>" +
-      "<input type='hidden' name='index' value='" + i + "'>" +
-      "<button class='btn sec' type='submit'>Retirer</button></form></div>";
+      "<div style='border-bottom:1px solid #2a2a2e;padding:8px 0;display:flex;justify-content:space-between;align-items:center'><span>" + m + "</span>" +
+      "<form method='POST' action='/staff/retirer'><input type='hidden' name='index' value='" + i + "'><button class='btn sec' type='submit'>Retirer</button></form></div>";
   });
   html += "</div>";
 
   html += "<div class='card'><h2>💰 Tarifs</h2>";
   data.tarifs.forEach((t, i) => {
     html +=
-      "<form method='POST' action='/staff/tarif' style='display:flex;gap:8px;margin-bottom:8px'>" +
-      "<input type='hidden' name='index' value='" + i + "'>" +
-      "<input type='text' name='nom' value='" + t[0] + "'>" +
-      "<input type='text' name='prix' value='" + t[1] + "' style='max-width:130px'>" +
-      "<button class='btn' type='submit'>OK</button></form>";
+      "<form method='POST' action='/staff/tarif' style='display:flex;gap:8px;margin-bottom:8px'><input type='hidden' name='index' value='" + i + "'>" +
+      "<input type='text' name='nom' value='" + t[0] + "'><input type='text' name='prix' value='" + t[1] + "' style='max-width:130px'><button class='btn' type='submit'>OK</button></form>";
   });
   html +=
-    "<form method='POST' action='/staff/tarif' style='display:flex;gap:8px;margin-top:12px'>" +
-    "<input type='hidden' name='index' value='new'>" +
-    "<input type='text' name='nom' placeholder='Nouvelle prestation'>" +
-    "<input type='text' name='prix' placeholder='Prix' style='max-width:130px'>" +
-    "<button class='btn' type='submit'>Ajouter</button></form></div>";
+    "<form method='POST' action='/staff/tarif' style='display:flex;gap:8px;margin-top:12px'><input type='hidden' name='index' value='new'>" +
+    "<input type='text' name='nom' placeholder='Nouvelle prestation'><input type='text' name='prix' placeholder='Prix' style='max-width:130px'><button class='btn' type='submit'>Ajouter</button></form>";
+  html +=
+    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2e'><p class='muted'>Publier ces tarifs sur le site web Benny's (la page publique se met a jour).</p>" +
+    "<form method='POST' action='/staff/publier-tarifs'><button class='btn ok' type='submit'>📤 Publier les tarifs sur le site</button></form>" +
+    "<p class='muted' style='margin-top:8px'>Dernière publication : " + (data.tarifsPubliesLe || "jamais") + "</p></div></div>";
 
   html += "<div class='card'><h2>🤝 Partenaires</h2>";
   data.partenaires.forEach((p, i) => {
     html +=
-      "<form method='POST' action='/staff/partenaire' style='display:flex;gap:8px;margin-bottom:8px'>" +
-      "<input type='hidden' name='index' value='" + i + "'>" +
-      "<input type='text' name='nom' value='" + p[0] + "'>" +
-      "<input type='text' name='desc' value='" + p[1] + "'>" +
-      "<button class='btn' type='submit'>OK</button></form>";
+      "<form method='POST' action='/staff/partenaire' style='display:flex;gap:8px;margin-bottom:8px'><input type='hidden' name='index' value='" + i + "'>" +
+      "<input type='text' name='nom' value='" + p[0] + "'><input type='text' name='desc' value='" + p[1] + "'><button class='btn' type='submit'>OK</button></form>";
   });
   html +=
-    "<form method='POST' action='/staff/partenaire' style='display:flex;gap:8px;margin-top:12px'>" +
-    "<input type='hidden' name='index' value='new'>" +
-    "<input type='text' name='nom' placeholder='Nouveau partenaire'>" +
-    "<input type='text' name='desc' placeholder='Description'>" +
-    "<button class='btn' type='submit'>Ajouter</button></form></div>";
+    "<form method='POST' action='/staff/partenaire' style='display:flex;gap:8px;margin-top:12px'><input type='hidden' name='index' value='new'>" +
+    "<input type='text' name='nom' placeholder='Nouveau partenaire'><input type='text' name='desc' placeholder='Description'><button class='btn' type='submit'>Ajouter</button></form></div>";
 
   return pageHtml("Dashboard Benny's", html);
 }
@@ -531,12 +485,9 @@ function renderDashboard() {
 function renderLoginPage(erreur) {
   return pageHtml(
     "Connexion Staff",
-    "<h1>🔧 Espace Staff Benny's</h1>" +
-      "<p class='muted'>Accès réservé à la direction.</p>" +
+    "<h1>🔧 Espace Staff Benny's</h1><p class='muted'>Accès réservé à la direction.</p>" +
       (erreur ? "<div class='card' style='border-color:#c0392b'>" + erreur + "</div>" : "") +
-      "<div class='card'><form method='POST' action='/staff'>" +
-      "<input type='password' name='mdp' placeholder='Mot de passe' required>" +
-      "<button class='btn' type='submit'>Se connecter</button></form></div>"
+      "<div class='card'><form method='POST' action='/staff'><input type='password' name='mdp' placeholder='Mot de passe' required><button class='btn' type='submit'>Se connecter</button></form></div>"
   );
 }
 
@@ -553,6 +504,16 @@ function isLogged(req) {
 const server = http.createServer(async (req, res) => {
   const url = req.url.split("?")[0];
 
+  // --- Export des tarifs pour le site public (CORS ouvert) ---
+  if (url === "/api/tarifs") {
+    const data = loadData();
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    });
+    return res.end(JSON.stringify({ tarifs: data.tarifs, partenaires: data.partenaires, publieLe: data.tarifsPubliesLe }));
+  }
+
   // --- Candidatures du site ---
   if (req.method === "POST" && url === "/candidature-webhook") {
     return parseBody(req, async (body) => {
@@ -563,15 +524,12 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ ok: false, error: "json invalide" }));
       }
-
       try {
         const nomRp = p.rpName || "-";
         const disc = p.discordTag || "-";
         const poste = p.poste || "Apprenti Mécanicien";
-        const id = "w" + Date.now();
-
         const data = loadData();
-        data.candidatures[id] = {
+        data.candidatures["w" + Date.now()] = {
           nom_rp: nomRp,
           discord: disc,
           age: p.rpAge || "-",
@@ -587,26 +545,28 @@ const server = http.createServer(async (req, res) => {
           try {
             const salon = await client.channels.fetch(SALON_CANDIDATURES_ID);
             if (salon && salon.isTextBased()) {
-              const embed = new EmbedBuilder()
-                .setTitle("🔧 Nouvelle candidature Benny's")
-                .setColor(0xff6a00)
-                .addFields(
-                  { name: "Nom RP", value: nomRp, inline: true },
-                  { name: "Discord", value: disc, inline: true },
-                  { name: "Âge RP", value: String(p.rpAge || "-"), inline: true },
-                  { name: "Poste", value: poste, inline: true },
-                  { name: "Disponibilités", value: p.dispo || "-", inline: false },
-                  { name: "Expérience", value: p.experience || "-", inline: false },
-                  { name: "Motivation", value: p.motivation || "-", inline: false }
-                )
-                .setFooter({ text: "Tableau de bord : /staff" });
-              await salon.send({ embeds: [embed] });
+              await salon.send({
+                embeds: [
+                  new EmbedBuilder()
+                    .setTitle("🔧 Nouvelle candidature Benny's")
+                    .setColor(0xff6a00)
+                    .addFields(
+                      { name: "Nom RP", value: nomRp, inline: true },
+                      { name: "Discord", value: disc, inline: true },
+                      { name: "Âge RP", value: String(p.rpAge || "-"), inline: true },
+                      { name: "Poste", value: poste, inline: true },
+                      { name: "Disponibilités", value: p.dispo || "-", inline: false },
+                      { name: "Expérience", value: p.experience || "-", inline: false },
+                      { name: "Motivation", value: p.motivation || "-", inline: false }
+                    )
+                    .setFooter({ text: "Tableau de bord : /staff" }),
+                ],
+              });
             }
           } catch (e) {
             console.error("Post salon impossible :", e.message);
           }
         }
-
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ ok: true }));
       } catch (err) {
@@ -616,7 +576,7 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // --- Connexion ---
+  // --- Connexion staff ---
   if (req.method === "POST" && url === "/staff") {
     return parseBody(req, (body) => {
       const mdp = new URLSearchParams(body).get("mdp") || "";
@@ -640,6 +600,7 @@ const server = http.createServer(async (req, res) => {
     "/staff/tarif",
     "/staff/partenaire",
     "/staff/garage",
+    "/staff/publier-tarifs",
   ];
 
   if (req.method === "POST" && actions.indexOf(url) !== -1) {
@@ -678,11 +639,7 @@ const server = http.createServer(async (req, res) => {
             if (data.effectif.indexOf(entry) === -1) data.effectif.push(entry);
           }
           saveData(data);
-          await log(
-            (decision === "accepte" ? "✅ " : "❌ ") +
-              "Candidature de " + (c.nom_rp || "candidat") +
-              (decision === "accepte" ? " acceptée" : " refusée") + " depuis le dashboard"
-          );
+          await log("Candidature de " + (c.nom_rp || "candidat") + (decision === "accepte" ? " acceptée" : " refusée") + " depuis le dashboard");
         }
       }
 
@@ -731,16 +688,19 @@ const server = http.createServer(async (req, res) => {
         await log("🚦 Garage " + (data.ouvert ? "OUVERT" : "FERMÉ") + " depuis le dashboard");
       }
 
+      if (url === "/staff/publier-tarifs") {
+        data.tarifsPubliesLe = new Date().toLocaleString("fr-FR");
+        saveData(data);
+        await log("📤 Tarifs publiés sur le site (" + data.tarifsPubliesLe + ")");
+      }
+
       res.writeHead(302, { Location: "/staff" });
       return res.end();
     });
   }
 
   if (url === "/staff/logout") {
-    res.writeHead(302, {
-      Location: "/staff",
-      "Set-Cookie": "bennys_staff=; Path=/; Max-Age=0",
-    });
+    res.writeHead(302, { Location: "/staff", "Set-Cookie": "bennys_staff=; Path=/; Max-Age=0" });
     return res.end();
   }
 
@@ -753,8 +713,7 @@ const server = http.createServer(async (req, res) => {
   res.end(
     pageHtml(
       "Bot Benny's",
-      "<h1>🔧 Bot Benny's</h1>" +
-        "<div class='card'><b>Bot Benny's en ligne ✅</b>" +
+      "<h1>🔧 Bot Benny's</h1><div class='card'><b>Bot Benny's en ligne ✅</b>" +
         "<p class='muted'>Tableau de bord : <a href='/staff' style='color:#ff6a00'>/staff</a></p></div>"
     )
   );
