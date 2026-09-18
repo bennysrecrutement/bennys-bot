@@ -1,7 +1,6 @@
 // ============================================================
-//  BOT DISCORD BENNY'S
-//  Dashboard + sauvegarde GitHub + grades + mise en avant
-//  + statut de recrutement + nouvelles commandes utiles
+//  BOT DISCORD BENNY'S — version complete
+//  Dashboard + sauvegarde GitHub + equipe + clientele + gestion
 // ============================================================
 
 const fs = require("fs");
@@ -31,7 +30,7 @@ const STAFF_PASSWORD = process.env.STAFF_PASSWORD || "bennys2026";
 
 const DATA_FILE = path.join(__dirname, "bennys_data.json");
 
-// --- Sauvegarde persistante sur GitHub (survit aux redeploiements) ---
+// --- Sauvegarde persistante sur GitHub ---
 const GH_TOKEN = (process.env.GH_TOKEN || "").trim();
 const GH_OWNER = (process.env.GH_OWNER || "bennysrecrutement").trim();
 const GH_REPO = (process.env.GH_REPO || "bennys-bot").trim();
@@ -88,6 +87,12 @@ const DEFAULT_DATA = {
   recrutement: true,
   effectif: [],
   candidatures: {},
+  primes: [],
+  absences: [],
+  stock: {},
+  interventions: [],
+  rendezVous: {},
+  devis: {},
   miseEnAvant: {
     employeSemaine: "",
     meilleurMecano: "",
@@ -137,7 +142,6 @@ function loadData() {
   if (!data.miseEnAvant || typeof data.miseEnAvant !== "object") {
     data.miseEnAvant = DEFAULT_DATA.miseEnAvant;
   }
-  // Migration : employeMois -> employeSemaine
   if (data.miseEnAvant.employeMois !== undefined && data.miseEnAvant.employeSemaine === undefined) {
     data.miseEnAvant.employeSemaine = data.miseEnAvant.employeMois;
   }
@@ -284,11 +288,9 @@ client.on("interactionCreate", async (interaction) => {
   });
   await log(
     (action === "accept" ? "✅ " : "❌ ") +
-      "Candidature de " +
-      res.nomRp +
+      "Candidature de " + res.nomRp +
       (action === "accept" ? " acceptée" : " refusée") +
-      " par " +
-      interaction.user.tag
+      " par " + interaction.user.tag
   );
 });
 
@@ -299,49 +301,114 @@ const commands = [
   new SlashCommandBuilder().setName("effectif").setDescription("Voir l'effectif"),
   new SlashCommandBuilder().setName("service").setDescription("Voir qui est en service"),
   new SlashCommandBuilder().setName("stats").setDescription("Statistiques du garage"),
+  new SlashCommandBuilder().setName("ca").setDescription("Chiffre d'affaires du garage"),
   new SlashCommandBuilder().setName("partenaires").setDescription("Liste des partenaires"),
   new SlashCommandBuilder().setName("tarifs").setDescription("Tarifs du garage"),
   new SlashCommandBuilder().setName("dashboard").setDescription("Lien du tableau de bord web (staff)"),
   new SlashCommandBuilder().setName("mise-en-avant").setDescription("Afficher les employés mis en avant"),
+  new SlashCommandBuilder().setName("classement").setDescription("Classement de l'equipe (primes)"),
+  new SlashCommandBuilder().setName("absences").setDescription("Voir les absences enregistrees"),
+  new SlashCommandBuilder()
+    .setName("candidatures")
+    .setDescription("Voir les candidatures en attente (staff)"),
   new SlashCommandBuilder()
     .setName("recrue")
     .setDescription("Ajouter un membre à l'effectif (staff)")
-    .addUserOption((o) =>
-      o.setName("membre").setDescription("Le joueur à ajouter").setRequired(true)
-    )
+    .addUserOption((o) => o.setName("membre").setDescription("Le joueur à ajouter").setRequired(true))
     .addStringOption((o) =>
-      o
-        .setName("grade")
-        .setDescription("Son grade")
-        .setRequired(true)
+      o.setName("grade").setDescription("Son grade").setRequired(true)
         .addChoices(...POSTES.map((p) => ({ name: p, value: p })))
     ),
   new SlashCommandBuilder()
     .setName("promouvoir")
     .setDescription("Changer le grade d'un membre (staff)")
+    .addStringOption((o) => o.setName("nom").setDescription("Nom RP du membre").setRequired(true))
     .addStringOption((o) =>
-      o.setName("nom").setDescription("Nom RP du membre").setRequired(true)
-    )
-    .addStringOption((o) =>
-      o
-        .setName("grade")
-        .setDescription("Nouveau grade")
-        .setRequired(true)
+      o.setName("grade").setDescription("Nouveau grade").setRequired(true)
         .addChoices(...POSTES.map((p) => ({ name: p, value: p })))
     ),
   new SlashCommandBuilder()
     .setName("renvoyer")
     .setDescription("Retirer un membre de l'effectif (staff)")
-    .addStringOption((o) =>
-      o.setName("nom").setDescription("Nom RP du membre").setRequired(true)
-    ),
+    .addStringOption((o) => o.setName("nom").setDescription("Nom RP du membre").setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("profil")
+    .setDescription("Fiche d'un membre de l'equipe")
+    .addStringOption((o) => o.setName("nom").setDescription("Nom RP du membre").setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("absence")
+    .setDescription("Déclarer une absence")
+    .addStringOption((o) => o.setName("nom").setDescription("Nom RP du membre").setRequired(true))
+    .addStringOption((o) => o.setName("debut").setDescription("Date de début").setRequired(true))
+    .addStringOption((o) => o.setName("fin").setDescription("Date de fin").setRequired(true))
+    .addStringOption((o) => o.setName("raison").setDescription("Raison de l'absence")),
   new SlashCommandBuilder()
     .setName("annonce")
     .setDescription("Publier une annonce Benny's (staff)")
-    .addStringOption((o) =>
-      o.setName("message").setDescription("Le texte de l'annonce").setRequired(true)
-    )
+    .addStringOption((o) => o.setName("message").setDescription("Le texte de l'annonce").setRequired(true))
     .addStringOption((o) => o.setName("titre").setDescription("Titre de l'annonce")),
+  new SlashCommandBuilder()
+    .setName("rdv")
+    .setDescription("Créer un rendez-vous client")
+    .addUserOption((o) => o.setName("client").setDescription("Le client").setRequired(true))
+    .addStringOption((o) =>
+      o.setName("type").setDescription("Type de rendez-vous").setRequired(true)
+        .addChoices(
+          { name: "Réparation", value: "Réparation" },
+          { name: "Custom", value: "Custom" },
+          { name: "Entretien", value: "Entretien" },
+          { name: "Dépannage", value: "Dépannage" },
+          { name: "Rendez-vous entreprise", value: "Rendez-vous entreprise" }
+        )
+    )
+    .addStringOption((o) => o.setName("quand").setDescription("Date / heure souhaitée").setRequired(true))
+    .addStringOption((o) => o.setName("vehicule").setDescription("Véhicule concerné")),
+  new SlashCommandBuilder()
+    .setName("intervention")
+    .setDescription("Enregistrer une intervention")
+    .addUserOption((o) => o.setName("client").setDescription("Le client").setRequired(true))
+    .addStringOption((o) =>
+      o.setName("type").setDescription("Type d'intervention").setRequired(true)
+        .addChoices(
+          { name: "Réparation", value: "Réparation" },
+          { name: "Dépannage Sud", value: "Dépannage Sud" },
+          { name: "Dépannage Nord", value: "Dépannage Nord" },
+          { name: "Custom", value: "Custom" },
+          { name: "Kit de réparation", value: "Kit de réparation" }
+        )
+    )
+    .addNumberOption((o) =>
+      o.setName("montant").setDescription("Montant encaissé en $").setRequired(true).setMinValue(0)
+    ),
+  new SlashCommandBuilder()
+    .setName("devis")
+    .setDescription("Créer un devis / facture")
+    .addUserOption((o) => o.setName("client").setDescription("Le client").setRequired(true))
+    .addStringOption((o) => o.setName("prestation").setDescription("Prestation demandée").setRequired(true))
+    .addNumberOption((o) =>
+      o.setName("montant").setDescription("Montant en $").setRequired(true).setMinValue(0)
+    ),
+  new SlashCommandBuilder()
+    .setName("prime")
+    .setDescription("Attribuer une prime à un membre")
+    .addStringOption((o) => o.setName("nom").setDescription("Nom RP du membre").setRequired(true))
+    .addNumberOption((o) =>
+      o.setName("montant").setDescription("Montant de la prime en $").setRequired(true).setMinValue(0)
+    )
+    .addStringOption((o) => o.setName("raison").setDescription("Raison de la prime")),
+  new SlashCommandBuilder()
+    .setName("stock")
+    .setDescription("Gérer le stock de pièces")
+    .addStringOption((o) =>
+      o.setName("action").setDescription("Ajouter, retirer ou lister").setRequired(true)
+        .addChoices(
+          { name: "Ajouter", value: "ajouter" },
+          { name: "Retirer", value: "retirer" },
+          { name: "Lister", value: "lister" }
+        )
+    )
+    .addStringOption((o) => o.setName("piece").setDescription("Nom de la pièce"))
+    .addIntegerOption((o) => o.setName("quantite").setDescription("Quantité").setMinValue(1)),
   new SlashCommandBuilder()
     .setName("joueur")
     .setDescription("Marquer un joueur en service")
@@ -350,12 +417,8 @@ const commands = [
     .setName("clear")
     .setDescription("Supprimer des messages de ce salon (staff)")
     .addIntegerOption((o) =>
-      o
-        .setName("nombre")
-        .setDescription("Nombre de messages a supprimer (1-100)")
-        .setMinValue(1)
-        .setMaxValue(100)
-        .setRequired(true)
+      o.setName("nombre").setDescription("Nombre de messages a supprimer (1-100)")
+        .setMinValue(1).setMaxValue(100).setRequired(true)
     ),
 ].map((c) => c.toJSON());
 
@@ -390,25 +453,30 @@ client.on("interactionCreate", async (interaction) => {
     if (mvp.meilleurMecano) lignes.push("🔧 **Meilleur mécanicien** : " + mvp.meilleurMecano);
     if (mvp.meilleurDepanneur) lignes.push("🚗 **Meilleur dépanneur** : " + mvp.meilleurDepanneur);
     if (mvp.meilleureSatisfaction) lignes.push("⭐ **Meilleure satisfaction client** : " + mvp.meilleureSatisfaction);
-    const embed = new EmbedBuilder()
-      .setTitle("🏆 Mise en avant — Benny's")
-      .setColor(0x8b5cf6)
-      .setDescription(lignes.length ? lignes.join("\n") : "Aucune mise en avant pour le moment.");
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🏆 Mise en avant — Benny's")
+          .setColor(0x8b5cf6)
+          .setDescription(lignes.length ? lignes.join("\n") : "Aucune mise en avant pour le moment."),
+      ],
+    });
   }
   if (cmd === "recrutement") {
     const ouvert = data.recrutement !== false;
-    const embed = new EmbedBuilder()
-      .setTitle("🔧 Recrutement Benny's")
-      .setColor(0x8b5cf6)
-      .setDescription(
-        ouvert
-          ? "Postes ouverts :\n" +
-              POSTES.map((p) => "• " + p).join("\n") +
-              "\n\n👉 Candidature sur le site web de Benny's."
-          : "❌ Le recrutement est actuellement **fermé**. Reviens plus tard !"
-      );
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🔧 Recrutement Benny's")
+          .setColor(0x8b5cf6)
+          .setDescription(
+            ouvert
+              ? "Postes ouverts :\n" + POSTES.map((p) => "• " + p).join("\n") +
+                "\n\n👉 Candidature sur le site web de Benny's."
+              : "❌ Le recrutement est actuellement **fermé**. Reviens plus tard !"
+          ),
+      ],
+    });
   }
   if (cmd === "effectif") {
     if (!data.effectif.length)
@@ -420,15 +488,7 @@ client.on("interactionCreate", async (interaction) => {
           .setColor(0x8b5cf6)
           .setDescription(
             data.effectif
-              .map(
-                (m) =>
-                  "• " +
-                  (m.actif === false ? "~~" : "") +
-                  m.nom +
-                  " — " +
-                  m.grade +
-                  (m.actif === false ? "~~ (inactif)" : "")
-              )
+              .map((m) => "• " + (m.actif === false ? "~~" : "") + m.nom + " — " + m.grade + (m.actif === false ? "~~ (inactif)" : ""))
               .join("\n")
           ),
       ],
@@ -467,17 +527,35 @@ client.on("interactionCreate", async (interaction) => {
             { name: "⏳ En attente", value: String(list.length - acc - ref), inline: true },
             { name: "👥 Effectif", value: String(data.effectif.length) + " (" + actifs + " actifs)", inline: true },
             { name: "🟢 Garage", value: data.ouvert ? "Ouvert" : "Fermé", inline: true },
-            { name: "📢 Recrutement", value: data.recrutement !== false ? "Ouvert" : "Fermé", inline: true }
+            { name: "📢 Recrutement", value: data.recrutement !== false ? "Ouvert" : "Fermé", inline: true },
+            { name: "🔧 Interventions", value: String((data.interventions || []).length), inline: true }
           ),
       ],
     });
   }
+  if (cmd === "ca") {
+    const inter = data.interventions || [];
+    const total = inter.reduce((s, i) => s + (Number(i.montant) || 0), 0);
+    const primesTotal = (data.primes || []).reduce((s, p) => s + (Number(p.montant) || 0), 0);
+    const parType = {};
+    inter.forEach(function (i) { parType[i.type] = (parType[i.type] || 0) + (Number(i.montant) || 0); });
+    const embed = new EmbedBuilder()
+      .setTitle("📈 Chiffre d'affaires Benny's")
+      .setColor(0x8b5cf6)
+      .addFields(
+        { name: "Interventions", value: String(inter.length), inline: true },
+        { name: "Chiffre d'affaires", value: total + "$", inline: true },
+        { name: "Primes versées", value: primesTotal + "$", inline: true },
+        { name: "Solde", value: (total - primesTotal) + "$", inline: true }
+      );
+    const details = Object.keys(parType).map((k) => "• " + k + " : " + parType[k] + "$").join("\n");
+    if (details) embed.addFields({ name: "Détail par type", value: details, inline: false });
+    return interaction.reply({ embeds: [embed] });
+  }
   if (cmd === "partenaires") {
     return interaction.reply({
       embeds: [
-        new EmbedBuilder()
-          .setTitle("🤝 Partenaires")
-          .setColor(0x8b5cf6)
+        new EmbedBuilder().setTitle("🤝 Partenaires").setColor(0x8b5cf6)
           .setDescription(data.partenaires.map((p) => "**" + p[0] + "** — " + p[1]).join("\n")),
       ],
     });
@@ -485,10 +563,60 @@ client.on("interactionCreate", async (interaction) => {
   if (cmd === "tarifs") {
     return interaction.reply({
       embeds: [
-        new EmbedBuilder()
-          .setTitle("💰 Tarifs Benny's")
-          .setColor(0x8b5cf6)
+        new EmbedBuilder().setTitle("💰 Tarifs Benny's").setColor(0x8b5cf6)
           .addFields(...data.tarifs.map((t) => ({ name: t[0], value: t[1], inline: true }))),
+      ],
+    });
+  }
+  if (cmd === "classement") {
+    if (!data.effectif.length) return interaction.reply({ content: "Effectif vide.", ephemeral: true });
+    const primes = data.primes || [];
+    const total = {};
+    primes.forEach(function (p) { total[p.nom] = (total[p.nom] || 0) + (Number(p.montant) || 0); });
+    const classement = Object.keys(total).sort(function (a, b) { return total[b] - total[a]; });
+    const description = classement.length
+      ? classement.map(function (n, i) {
+          const medaille = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "•";
+          return medaille + " **" + n + "** — " + total[n] + "$";
+        }).join("\n")
+      : "Aucune prime attribuée pour le moment.";
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder().setTitle("🏆 Classement Benny's").setColor(0x8b5cf6)
+          .setDescription(description)
+          .setFooter({ text: data.effectif.length + " membres • " + primes.length + " primes" }),
+      ],
+    });
+  }
+  if (cmd === "absences") {
+    const abs = data.absences || [];
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder().setTitle("🌴 Absences enregistrées").setColor(0x8b5cf6)
+          .setDescription(
+            abs.length
+              ? abs.slice(-15).map((a) => "• **" + a.nom + "** : " + a.debut + " → " + a.fin + " _(" + a.raison + ")_").join("\n")
+              : "Aucune absence enregistrée."
+          ),
+      ],
+    });
+  }
+  if (cmd === "candidatures") {
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
+    }
+    const attente = Object.values(data.candidatures).filter((c) => c.statut === "en_attente");
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("📋 Candidatures en attente")
+          .setColor(0x8b5cf6)
+          .setDescription(
+            attente.length
+              ? attente.map((c) => "• **" + (c.nom_rp || "?") + "** — " + (c.poste || "?") + " _(" + (c.discord || "-") + ")_").join("\n") +
+                "\n\n👉 Traiter depuis le dashboard : /dashboard"
+              : "Aucune candidature en attente. 🎉"
+          ),
       ],
     });
   }
@@ -498,48 +626,36 @@ client.on("interactionCreate", async (interaction) => {
     }
     const m = interaction.options.getUser("membre");
     const grade = interaction.options.getString("grade");
-    const dejaLa = data.effectif.some(
-      (x) => x.nom && x.nom.toLowerCase() === m.username.toLowerCase()
-    );
-    if (dejaLa) {
-      return interaction.reply({ content: "⚠️ " + m + " est déjà dans l'effectif.", ephemeral: true });
-    }
+    const dejaLa = data.effectif.some((x) => x.nom && x.nom.toLowerCase() === m.username.toLowerCase());
+    if (dejaLa) return interaction.reply({ content: "⚠️ " + m + " est déjà dans l'effectif.", ephemeral: true });
     data.effectif.push({ nom: m.username, grade: grade, actif: true });
     saveData(data);
     await interaction.reply({
       embeds: [
-        new EmbedBuilder()
-          .setTitle("✅ Nouvelle recrue")
-          .setColor(0x8b5cf6)
+        new EmbedBuilder().setTitle("✅ Nouvelle recrue").setColor(0x8b5cf6)
           .setDescription(m + " rejoint l'équipe Benny's en tant que **" + grade + "**.")
           .setFooter({ text: "Ajouté par " + interaction.user.tag }),
       ],
     });
-    return log("✅ " + m.tag + " ajouté à l'effectif (" + grade + ") par " + interaction.user.tag);
+    return log("✅ " + m.tag + " ajouté à l'effectif (" + grade + ")");
   }
   if (cmd === "renvoyer") {
     if (!hasPermission(interaction.member)) {
       return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
     }
     const nom = interaction.options.getString("nom");
-    const idx = data.effectif.findIndex(
-      (x) => x.nom && x.nom.toLowerCase().indexOf(nom.toLowerCase()) !== -1
-    );
-    if (idx === -1) {
-      return interaction.reply({ content: "❌ Aucun membre trouvé pour « " + nom + " ».", ephemeral: true });
-    }
+    const idx = data.effectif.findIndex((x) => x.nom && x.nom.toLowerCase().indexOf(nom.toLowerCase()) !== -1);
+    if (idx === -1) return interaction.reply({ content: "❌ Aucun membre trouvé pour « " + nom + " ».", ephemeral: true });
     const retire = data.effectif.splice(idx, 1)[0];
     saveData(data);
     await interaction.reply({
       embeds: [
-        new EmbedBuilder()
-          .setTitle("❌ Membre retiré")
-          .setColor(0xc0392b)
+        new EmbedBuilder().setTitle("❌ Membre retiré").setColor(0xc0392b)
           .setDescription("**" + retire.nom + "** (" + retire.grade + ") a été retiré de l'effectif.")
           .setFooter({ text: "Par " + interaction.user.tag }),
       ],
     });
-    return log("➖ " + retire.nom + " retiré de l'effectif par " + interaction.user.tag);
+    return log("➖ " + retire.nom + " retiré de l'effectif");
   }
   if (cmd === "promouvoir") {
     if (!hasPermission(interaction.member)) {
@@ -547,25 +663,61 @@ client.on("interactionCreate", async (interaction) => {
     }
     const nom = interaction.options.getString("nom");
     const grade = interaction.options.getString("grade");
-    const membre = data.effectif.find(
-      (x) => x.nom && x.nom.toLowerCase().indexOf(nom.toLowerCase()) !== -1
-    );
-    if (!membre) {
-      return interaction.reply({ content: "❌ Aucun membre trouvé pour « " + nom + " ».", ephemeral: true });
-    }
+    const membre = data.effectif.find((x) => x.nom && x.nom.toLowerCase().indexOf(nom.toLowerCase()) !== -1);
+    if (!membre) return interaction.reply({ content: "❌ Aucun membre trouvé pour « " + nom + " ».", ephemeral: true });
     const ancien = membre.grade;
     membre.grade = grade;
     saveData(data);
     await interaction.reply({
       embeds: [
-        new EmbedBuilder()
-          .setTitle("🎖 Changement de grade")
-          .setColor(0x8b5cf6)
+        new EmbedBuilder().setTitle("🎖 Changement de grade").setColor(0x8b5cf6)
           .setDescription("**" + membre.nom + "** : " + ancien + " → **" + grade + "**")
           .setFooter({ text: "Par " + interaction.user.tag }),
       ],
     });
-    return log("🎖 " + membre.nom + " : " + ancien + " → " + grade + " par " + interaction.user.tag);
+    return log("🎖 " + membre.nom + " : " + ancien + " → " + grade);
+  }
+  if (cmd === "profil") {
+    const nom = interaction.options.getString("nom");
+    const m = data.effectif.find((x) => x.nom && x.nom.toLowerCase().indexOf(nom.toLowerCase()) !== -1);
+    if (!m) return interaction.reply({ content: "❌ Aucun membre trouvé pour « " + nom + " ».", ephemeral: true });
+    const primes = (data.primes || []).filter((p) => p.nom && p.nom.toLowerCase().indexOf(m.nom.toLowerCase()) !== -1);
+    const totalPrimes = primes.reduce((s, p) => s + (Number(p.montant) || 0), 0);
+    const inter = (data.interventions || []).length;
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder().setTitle("👤 " + m.nom).setColor(0x8b5cf6)
+          .addFields(
+            { name: "Grade", value: m.grade || "—", inline: true },
+            { name: "Statut", value: m.actif === false ? "🔴 Inactif" : "🟢 Actif", inline: true },
+            { name: "Primes reçues", value: String(primes.length), inline: true },
+            { name: "Total des primes", value: totalPrimes + "$", inline: true },
+            { name: "Interventions enregistrées", value: String(inter), inline: true }
+          )
+          .setFooter({ text: "Benny's Original Motor Works" }),
+      ],
+    });
+  }
+  if (cmd === "absence") {
+    const nom = interaction.options.getString("nom");
+    const debut = interaction.options.getString("debut");
+    const fin = interaction.options.getString("fin");
+    const raison = interaction.options.getString("raison") || "—";
+    data.absences = data.absences || [];
+    data.absences.push({ nom: nom, debut: debut, fin: fin, raison: raison, par: interaction.user.tag });
+    saveData(data);
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder().setTitle("🌴 Absence enregistrée").setColor(0x8b5cf6)
+          .addFields(
+            { name: "Membre", value: nom, inline: true },
+            { name: "Du", value: debut, inline: true },
+            { name: "Au", value: fin, inline: true },
+            { name: "Raison", value: raison, inline: false }
+          ),
+      ],
+    });
+    return log("🌴 Absence de " + nom + " (" + debut + " → " + fin + ")");
   }
   if (cmd === "annonce") {
     if (!hasPermission(interaction.member)) {
@@ -575,14 +727,138 @@ client.on("interactionCreate", async (interaction) => {
     const titre = interaction.options.getString("titre") || "📢 Annonce Benny's";
     await interaction.reply({
       embeds: [
-        new EmbedBuilder()
-          .setTitle(titre)
-          .setColor(0x8b5cf6)
-          .setDescription(texte)
-          .setFooter({ text: "Benny's Original Motor Works" }),
+        new EmbedBuilder().setTitle(titre).setColor(0x8b5cf6)
+          .setDescription(texte).setFooter({ text: "Benny's Original Motor Works" }),
       ],
     });
     return log("📢 Annonce publiée par " + interaction.user.tag);
+  }
+  if (cmd === "rdv") {
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
+    }
+    const client_ = interaction.options.getUser("client");
+    const type = interaction.options.getString("type");
+    const quand = interaction.options.getString("quand");
+    const vehicule = interaction.options.getString("vehicule") || "—";
+    data.rendezVous = data.rendezVous || {};
+    data.rendezVous["rdv" + Date.now()] = { client: client_.id, type: type, quand: quand, vehicule: vehicule, statut: "confirme" };
+    saveData(data);
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder().setTitle("🗓️ Rendez-vous Benny's").setColor(0x8b5cf6)
+          .addFields(
+            { name: "Client", value: String(client_), inline: true },
+            { name: "Type", value: type, inline: true },
+            { name: "Quand", value: quand, inline: true },
+            { name: "Véhicule", value: vehicule, inline: true }
+          )
+          .setFooter({ text: "Créé par " + interaction.user.tag }),
+      ],
+    });
+    return log("🗓️ RDV créé pour " + client_.tag + " (" + type + " — " + quand + ")");
+  }
+  if (cmd === "intervention") {
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
+    }
+    const client_ = interaction.options.getUser("client");
+    const type = interaction.options.getString("type");
+    const montant = interaction.options.getNumber("montant");
+    data.interventions = data.interventions || [];
+    data.interventions.push({ client: client_.id, type: type, montant: montant, par: interaction.user.tag, le: new Date().toLocaleString("fr-FR") });
+    saveData(data);
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder().setTitle("🔧 Intervention enregistrée").setColor(0x8b5cf6)
+          .addFields(
+            { name: "Client", value: String(client_), inline: true },
+            { name: "Type", value: type, inline: true },
+            { name: "Montant", value: montant + "$", inline: true }
+          )
+          .setFooter({ text: "Par " + interaction.user.tag }),
+      ],
+    });
+    return log("🔧 Intervention " + type + " — " + montant + "$ (" + client_.tag + ")");
+  }
+  if (cmd === "devis") {
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
+    }
+    const client_ = interaction.options.getUser("client");
+    const prestation = interaction.options.getString("prestation");
+    const montant = interaction.options.getNumber("montant");
+    const numero = "B-" + String(Date.now()).slice(-6);
+    data.devis = data.devis || {};
+    data.devis[numero] = { client: client_.id, prestation: prestation, montant: montant, le: new Date().toLocaleString("fr-FR") };
+    saveData(data);
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder().setTitle("🧾 Devis Benny's — n° " + numero).setColor(0x8b5cf6)
+          .addFields(
+            { name: "Client", value: String(client_), inline: true },
+            { name: "Prestation", value: prestation, inline: true },
+            { name: "Montant", value: montant + "$", inline: true }
+          )
+          .setFooter({ text: "Benny's Original Motor Works • " + numero }),
+      ],
+    });
+    return log("🧾 Devis " + numero + " : " + prestation + " — " + montant + "$ pour " + client_.tag);
+  }
+  if (cmd === "prime") {
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Tu n'as pas la permission.", ephemeral: true });
+    }
+    const nom = interaction.options.getString("nom");
+    const montant = interaction.options.getNumber("montant");
+    const raison = interaction.options.getString("raison") || "—";
+    const membre = data.effectif.find((x) => x.nom && x.nom.toLowerCase().indexOf(nom.toLowerCase()) !== -1);
+    if (!membre) return interaction.reply({ content: "❌ Aucun membre trouvé pour « " + nom + " ».", ephemeral: true });
+    data.primes = data.primes || [];
+    data.primes.push({ nom: membre.nom, montant: montant, raison: raison, le: new Date().toLocaleString("fr-FR") });
+    saveData(data);
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder().setTitle("💸 Prime attribuée").setColor(0x2ecc71)
+          .setDescription("**" + membre.nom + "** reçoit une prime de **" + montant + "**")
+          .addFields({ name: "Raison", value: raison, inline: false })
+          .setFooter({ text: "Par " + interaction.user.tag }),
+      ],
+    });
+    return log("💸 Prime de " + montant + "$ pour " + membre.nom);
+  }
+  if (cmd === "stock") {
+    const action = interaction.options.getString("action");
+    const piece = interaction.options.getString("piece");
+    const qte = interaction.options.getInteger("quantite") || 0;
+    data.stock = data.stock || {};
+    if (action === "lister") {
+      const cles = Object.keys(data.stock);
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder().setTitle("📦 Stock Benny's").setColor(0x8b5cf6)
+            .setDescription(
+              cles.length
+                ? cles.map((k) => "• **" + k + "** : " + data.stock[k] + (data.stock[k] <= 3 ? "  ⚠️ stock bas" : "")).join("\n")
+                : "Le stock est vide."
+            ),
+        ],
+      });
+    }
+    if (!piece) return interaction.reply({ content: "❌ Indique le nom de la pièce.", ephemeral: true });
+    const avant = data.stock[piece] || 0;
+    const apres = action === "ajouter" ? avant + qte : Math.max(0, avant - qte);
+    data.stock[piece] = apres;
+    saveData(data);
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder().setTitle(action === "ajouter" ? "📦 Stock ajouté" : "📤 Stock retiré")
+          .setColor(action === "ajouter" ? 0x2ecc71 : 0xffaa00)
+          .setDescription("**" + piece + "** : " + avant + " → **" + apres + "**")
+          .setFooter({ text: "Par " + interaction.user.tag }),
+      ],
+    });
+    return log("📦 Stock " + piece + " : " + avant + " → " + apres);
   }
   if (cmd === "joueur") {
     const m = interaction.options.getUser("membre");
@@ -606,14 +882,14 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // ============================================================
-//  WEB
+//  WEB : dashboard + API
 // ============================================================
 function pageHtml(titre, corps) {
   return (
     "<!DOCTYPE html><html lang='fr'><head><meta charset='UTF-8'>" +
     "<meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
     "<title>" + titre + "</title><style>" +
-    "body{background:#0b0b0d;color:#f4f4f5;font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;line-height:1.6}" +
+    "body{background:#0b0a0d;color:#f4f4f5;font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;line-height:1.6}" +
     ".wrap{max-width:1000px;margin:0 auto;padding:32px 20px 60px}" +
     "h1{color:#a78bfa;font-size:1.5rem;margin:0 0 4px}" +
     "h2{font-size:1.05rem;margin:0 0 14px;color:#fff}" +
@@ -645,6 +921,10 @@ function renderDashboard() {
   const ref = liste.filter((c) => c[1].statut === "refuse").length;
   const att = liste.length - acc - ref;
   const actifs = (data.effectif || []).filter((m) => m.actif !== false).length;
+  const inter = data.interventions || [];
+  const ca = inter.reduce((s, i) => s + (Number(i.montant) || 0), 0);
+  const primesList = data.primes || [];
+  const primesTotal = primesList.reduce((s, p) => s + (Number(p.montant) || 0), 0);
 
   let html =
     "<div class='top'><div><h1>🔧 Tableau de bord — Benny's</h1>" +
@@ -654,13 +934,13 @@ function renderDashboard() {
     "<div class='grid'>" +
     "<div class='stat'><b>" + liste.length + "</b><span>Candidatures</span></div>" +
     "<div class='stat'><b>" + att + "</b><span>En attente</span></div>" +
-    "<div class='stat'><b>" + acc + "</b><span>Acceptées</span></div>" +
-    "<div class='stat'><b>" + ref + "</b><span>Refusées</span></div>" +
     "<div class='stat'><b>" + actifs + "/" + (data.effectif || []).length + "</b><span>Effectif actif</span></div>" +
+    "<div class='stat'><b>" + ca + "$" + "</b><span>Chiffre d'affaires</span></div>" +
+    "<div class='stat'><b>" + primesTotal + "$" + "</b><span>Primes versées</span></div>" +
     "<div class='stat'><b>" + (data.ouvert ? "OUVERT" : "FERMÉ") + "</b><span>Garage</span></div>" +
     "</div>" +
     "<div class='card'><h2>📢 Recrutement</h2>" +
-    "<p class='muted'>Choisis si le garage recrute en ce moment. Le site affichera l'information.</p>" +
+    "<p class='muted'>Choisis si le garage recrute en ce moment.</p>" +
     "<p style='margin:10px 0'>Statut actuel : <b>" + (data.recrutement !== false ? "OUVERT ✅" : "FERMÉ ❌") + "</b></p>" +
     "<form method='POST' action='/staff/recrutement' style='display:inline'>" +
     "<input type='hidden' name='etat' value='ouvert'><button class='btn ok' type='submit'>✅ Recrutement ouvert</button></form>" +
@@ -686,16 +966,13 @@ function renderDashboard() {
 
   html += "<div class='card'><h2>📋 Candidatures</h2>";
   if (!liste.length) html += "<p class='muted'>Aucune candidature pour le moment.</p>";
-
   for (const item of liste) {
     const id = item[0];
     const c = item[1];
     const statut =
-      c.statut === "accepte"
-        ? "<span class='badge b-accepte'>Accepté</span>"
-        : c.statut === "refuse"
-        ? "<span class='badge b-refuse'>Refusé</span>"
-        : "<span class='badge b-attente'>En attente</span>";
+      c.statut === "accepte" ? "<span class='badge b-accepte'>Accepté</span>"
+      : c.statut === "refuse" ? "<span class='badge b-refuse'>Refusé</span>"
+      : "<span class='badge b-attente'>En attente</span>";
     html +=
       "<div style='border-bottom:1px solid #2a2432;padding:12px 0'><b>" +
       (c.nom_rp || "Sans nom") + "</b> — " + (c.poste || "?") + " " + statut +
@@ -732,7 +1009,41 @@ function renderDashboard() {
     "<form method='POST' action='/staff/membre' style='display:flex;gap:8px'>" +
     "<input type='text' name='nom' placeholder='Nom du nouveau membre' required>" +
     "<select name='grade' style='max-width:200px'>" + POSTES.map((g) => "<option value='" + g + "'>" + g + "</option>").join("") + "</select>" +
-    "<button class='btn' type='submit'>Ajouter un membre</button></form></div>";
+    "<button class='btn' type='submit'>Ajouter un membre</button></form></div></div>";
+
+  html += "<div class='card'><h2>💸 Primes</h2>";
+  if (!primesList.length) html += "<p class='muted'>Aucune prime attribuée.</p>";
+  primesList.slice().reverse().slice(0, 10).forEach(function (p) {
+    html += "<div style='border-bottom:1px solid #2a2432;padding:8px 0'>💸 <b>" + p.nom + "</b> — " + p.montant + "$ <span class='muted'>(" + (p.raison || "—") + " • " + p.le + ")</span></div>";
+  });
+  html += "<div style='margin-top:14px;padding-top:14px;border-top:1px solid #2a2432'>" +
+    "<form method='POST' action='/staff/prime' style='display:flex;gap:8px'>" +
+    "<input type='text' name='nom' placeholder='Nom du membre' required>" +
+    "<input type='number' name='montant' placeholder='Montant' required style='max-width:140px'>" +
+    "<input type='text' name='raison' placeholder='Raison'>" +
+    "<button class='btn' type='submit'>Donner la prime</button></form></div></div>";
+
+  html += "<div class='card'><h2>📦 Stock</h2>";
+  const stockCles = Object.keys(data.stock || {});
+  if (!stockCles.length) html += "<p class='muted'>Stock vide.</p>";
+  stockCles.forEach(function (k) {
+    html += "<div style='border-bottom:1px solid #2a2432;padding:6px 0'>📦 <b>" + k + "</b> : " + data.stock[k] + (data.stock[k] <= 3 ? " <span class='badge b-refuse'>stock bas</span>" : "") + "</div>";
+  });
+  html += "</div>";
+
+  html += "<div class='card'><h2>🌴 Absences</h2>";
+  const abs = data.absences || [];
+  if (!abs.length) html += "<p class='muted'>Aucune absence enregistrée.</p>";
+  abs.slice(-8).forEach(function (a) {
+    html += "<div style='border-bottom:1px solid #2a2432;padding:8px 0'>🌴 <b>" + a.nom + "</b> : " + a.debut + " → " + a.fin + " <span class='muted'>(" + (a.raison || "—") + ")</span></div>";
+  });
+  html += "</div>";
+
+  html += "<div class='card'><h2>🔧 Interventions récentes</h2>";
+  if (!inter.length) html += "<p class='muted'>Aucune intervention enregistrée.</p>";
+  inter.slice().reverse().slice(0, 10).forEach(function (i) {
+    html += "<div style='border-bottom:1px solid #2a2432;padding:8px 0'>🔧 <b>" + i.type + "</b> — " + i.montant + "$ <span class='muted'>(" + i.le + " • par " + i.par + ")</span></div>";
+  });
   html += "</div>";
 
   const mvp = data.miseEnAvant || {};
@@ -802,13 +1113,10 @@ function isLogged(req) {
 const server = http.createServer(async (req, res) => {
   const url = req.url.split("?")[0];
 
-  // --- Export pour le site public ---
   if (url === "/api/tarifs") {
     const data = loadData();
-    res.writeHead(200, {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    });
+    const inter = data.interventions || [];
+    res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
     return res.end(
       JSON.stringify({
         tarifs: data.tarifs,
@@ -817,6 +1125,8 @@ const server = http.createServer(async (req, res) => {
         effectif: (data.effectif || []).map((m) => ({ nom: m.nom, grade: m.grade, actif: m.actif !== false })),
         ouvert: !!data.ouvert,
         recrutement: data.recrutement !== false,
+        ca: inter.reduce((s, i) => s + (Number(i.montant) || 0), 0),
+        interventions: inter.length,
         tarifsPubliesLe: data.tarifsPubliesLe || "jamais",
         partenairesPubliesLe: data.partenairesPubliesLe || "jamais",
         miseEnAvantPublieeLe: data.miseEnAvantPublieeLe || "jamais",
@@ -824,13 +1134,11 @@ const server = http.createServer(async (req, res) => {
     );
   }
 
-  // --- Candidatures du site ---
   if (req.method === "POST" && url === "/candidature-webhook") {
     return parseBody(req, async (body) => {
       let p;
-      try {
-        p = JSON.parse(body);
-      } catch {
+      try { p = JSON.parse(body); }
+      catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ ok: false, error: "json invalide" }));
       }
@@ -840,26 +1148,18 @@ const server = http.createServer(async (req, res) => {
         const poste = p.poste || "Apprenti Mécanicien";
         const data = loadData();
         data.candidatures["w" + Date.now()] = {
-          nom_rp: nomRp,
-          discord: disc,
-          age: p.rpAge || "-",
-          poste: poste,
-          dispo: p.dispo || "-",
-          experience: p.experience || "-",
-          motivation: p.motivation || "-",
-          statut: "en_attente",
+          nom_rp: nomRp, discord: disc, age: p.rpAge || "-", poste: poste,
+          dispo: p.dispo || "-", experience: p.experience || "-",
+          motivation: p.motivation || "-", statut: "en_attente",
         };
         saveData(data);
-
         if (SALON_CANDIDATURES_ID && SALON_CANDIDATURES_ID !== "0") {
           try {
             const salon = await client.channels.fetch(SALON_CANDIDATURES_ID);
             if (salon && salon.isTextBased()) {
               await salon.send({
                 embeds: [
-                  new EmbedBuilder()
-                    .setTitle("🔧 Nouvelle candidature Benny's")
-                    .setColor(0x8b5cf6)
+                  new EmbedBuilder().setTitle("🔧 Nouvelle candidature Benny's").setColor(0x8b5cf6)
                     .addFields(
                       { name: "Nom RP", value: nomRp, inline: true },
                       { name: "Discord", value: disc, inline: true },
@@ -873,9 +1173,7 @@ const server = http.createServer(async (req, res) => {
                 ],
               });
             }
-          } catch (e) {
-            console.error("Post salon impossible :", e.message);
-          }
+          } catch (e) { console.error("Post salon impossible :", e.message); }
         }
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ ok: true }));
@@ -886,7 +1184,6 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // --- Connexion staff ---
   if (req.method === "POST" && url === "/staff") {
     return parseBody(req, (body) => {
       const mdp = new URLSearchParams(body).get("mdp") || "";
@@ -903,21 +1200,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   const actions = [
-    "/staff/ajouter",
-    "/staff/decision",
-    "/staff/supprimer",
-    "/staff/retirer",
-    "/staff/tarif",
-    "/staff/partenaire",
-    "/staff/garage",
-    "/staff/publier-tarifs",
-    "/staff/publier-partenaires",
-    "/staff/grade",
-    "/staff/actif",
-    "/staff/membre",
-    "/staff/mise-en-avant",
-    "/staff/publier-mise-en-avant",
-    "/staff/recrutement",
+    "/staff/ajouter", "/staff/decision", "/staff/supprimer", "/staff/retirer",
+    "/staff/tarif", "/staff/partenaire", "/staff/garage", "/staff/publier-tarifs",
+    "/staff/publier-partenaires", "/staff/grade", "/staff/actif", "/staff/membre",
+    "/staff/mise-en-avant", "/staff/publier-mise-en-avant", "/staff/recrutement",
+    "/staff/prime",
   ];
 
   if (req.method === "POST" && actions.indexOf(url) !== -1) {
@@ -933,19 +1220,13 @@ const server = http.createServer(async (req, res) => {
         const nomRp = params.get("nom_rp") || "-";
         const poste = params.get("poste") || "Apprenti Mécanicien";
         data.candidatures["m" + Date.now()] = {
-          nom_rp: nomRp,
-          discord: params.get("discord") || "-",
-          age: params.get("age") || "-",
-          poste: poste,
-          dispo: params.get("dispo") || "-",
-          experience: "-",
-          motivation: params.get("motivation") || "-",
-          statut: "en_attente",
+          nom_rp: nomRp, discord: params.get("discord") || "-", age: params.get("age") || "-",
+          poste: poste, dispo: params.get("dispo") || "-", experience: "-",
+          motivation: params.get("motivation") || "-", statut: "en_attente",
         };
         saveData(data);
-        await log("➕ Candidature ajoutée à la main : " + nomRp + " — " + poste);
+        await log("➕ Candidature ajoutée à la main : " + nomRp);
       }
-
       if (url === "/staff/decision") {
         const c = data.candidatures[params.get("id")];
         const decision = params.get("decision");
@@ -953,116 +1234,71 @@ const server = http.createServer(async (req, res) => {
           c.statut = decision === "accepte" ? "accepte" : "refuse";
           if (decision === "accepte") {
             const dejaLa = data.effectif.some((m) => m.nom && m.nom.indexOf(c.nom_rp || "") !== -1);
-            if (!dejaLa)
-              data.effectif.push({ nom: c.nom_rp || "candidat", grade: c.poste || "Mécanicien", actif: true });
+            if (!dejaLa) data.effectif.push({ nom: c.nom_rp || "candidat", grade: c.poste || "Mécanicien", actif: true });
           }
           saveData(data);
-          await log(
-            "Candidature de " + (c.nom_rp || "candidat") +
-              (decision === "accepte" ? " acceptée" : " refusée") + " depuis le dashboard"
-          );
+          await log("Candidature de " + (c.nom_rp || "candidat") + (decision === "accepte" ? " acceptée" : " refusée") + " depuis le dashboard");
         }
       }
-
-      if (url === "/staff/supprimer") {
-        delete data.candidatures[params.get("id")];
-        saveData(data);
-      }
-
+      if (url === "/staff/supprimer") { delete data.candidatures[params.get("id")]; saveData(data); }
       if (url === "/staff/retirer") {
         const i = parseInt(params.get("index"), 10);
-        if (!isNaN(i)) {
-          const retire = data.effectif[i];
-          data.effectif.splice(i, 1);
-          saveData(data);
-          if (retire) await log("➖ " + retire.nom + " retiré de l'effectif");
-        }
+        if (!isNaN(i)) { const retire = data.effectif[i]; data.effectif.splice(i, 1); saveData(data); if (retire) await log("➖ " + retire.nom + " retiré"); }
       }
-
       if (url === "/staff/tarif") {
         const i = params.get("index");
         const nom = params.get("nom") || "";
         const prix = params.get("prix") || "";
-        if (i === "new") {
-          if (nom) data.tarifs.push([nom, prix || "-"]);
-        } else {
-          const idx = parseInt(i, 10);
-          if (!isNaN(idx) && data.tarifs[idx]) data.tarifs[idx] = [nom, prix];
-        }
+        if (i === "new") { if (nom) data.tarifs.push([nom, prix || "-"]); }
+        else { const idx = parseInt(i, 10); if (!isNaN(idx) && data.tarifs[idx]) data.tarifs[idx] = [nom, prix]; }
         saveData(data);
       }
-
       if (url === "/staff/partenaire") {
         const i = params.get("index");
         const nom = params.get("nom") || "";
         const desc = params.get("desc") || "";
-        if (i === "new") {
-          if (nom) data.partenaires.push([nom, desc || "Partenaire officiel"]);
-        } else {
-          const idx = parseInt(i, 10);
-          if (!isNaN(idx) && data.partenaires[idx]) data.partenaires[idx] = [nom, desc];
-        }
+        if (i === "new") { if (nom) data.partenaires.push([nom, desc || "Partenaire officiel"]); }
+        else { const idx = parseInt(i, 10); if (!isNaN(idx) && data.partenaires[idx]) data.partenaires[idx] = [nom, desc]; }
         saveData(data);
       }
-
+      if (url === "/staff/prime") {
+        const nom = params.get("nom") || "";
+        const montant = Number(params.get("montant")) || 0;
+        const raison = params.get("raison") || "—";
+        const membre = data.effectif.find((x) => x.nom && x.nom.toLowerCase().indexOf(nom.toLowerCase()) !== -1);
+        if (membre) {
+          data.primes = data.primes || [];
+          data.primes.push({ nom: membre.nom, montant: montant, raison: raison, le: new Date().toLocaleString("fr-FR") });
+          saveData(data);
+          await log("💸 Prime de " + montant + "$ pour " + membre.nom + " depuis le dashboard");
+        }
+      }
       if (url === "/staff/recrutement") {
         data.recrutement = params.get("etat") === "ouvert";
         saveData(data);
-        await log("📢 Recrutement " + (data.recrutement ? "OUVERT" : "FERMÉ") + " depuis le dashboard");
+        await log("📢 Recrutement " + (data.recrutement ? "OUVERT" : "FERMÉ"));
       }
-
       if (url === "/staff/garage") {
         data.ouvert = params.get("etat") === "ouvert";
         saveData(data);
-        await log("🚦 Garage " + (data.ouvert ? "OUVERT" : "FERMÉ") + " depuis le dashboard");
+        await log("🚦 Garage " + (data.ouvert ? "OUVERT" : "FERMÉ"));
       }
-
-      if (url === "/staff/publier-tarifs") {
-        data.tarifsPubliesLe = new Date().toLocaleString("fr-FR");
-        saveData(data);
-        await log("📤 Tarifs publiés sur le site (" + data.tarifsPubliesLe + ")");
-      }
-
-      if (url === "/staff/publier-partenaires") {
-        data.partenairesPubliesLe = new Date().toLocaleString("fr-FR");
-        saveData(data);
-        await log("📤 Partenaires publiés sur le site (" + data.partenairesPubliesLe + ")");
-      }
-
+      if (url === "/staff/publier-tarifs") { data.tarifsPubliesLe = new Date().toLocaleString("fr-FR"); saveData(data); }
+      if (url === "/staff/publier-partenaires") { data.partenairesPubliesLe = new Date().toLocaleString("fr-FR"); saveData(data); }
       if (url === "/staff/grade") {
         const i = parseInt(params.get("index"), 10);
         const grade = params.get("grade") || "Mécanicien";
-        if (!isNaN(i) && data.effectif[i]) {
-          const ancien = data.effectif[i].grade;
-          data.effectif[i].grade = grade;
-          saveData(data);
-          await log("🎖 " + data.effectif[i].nom + " : " + ancien + " → " + grade);
-        }
+        if (!isNaN(i) && data.effectif[i]) { data.effectif[i].grade = grade; saveData(data); }
       }
-
       if (url === "/staff/actif") {
         const i = parseInt(params.get("index"), 10);
-        if (!isNaN(i) && data.effectif[i]) {
-          data.effectif[i].actif = !data.effectif[i].actif;
-          saveData(data);
-          await log(
-            (data.effectif[i].actif ? "🟢 " : "🔴 ") +
-              data.effectif[i].nom +
-              (data.effectif[i].actif ? " est actif" : " est inactif")
-          );
-        }
+        if (!isNaN(i) && data.effectif[i]) { data.effectif[i].actif = !data.effectif[i].actif; saveData(data); }
       }
-
       if (url === "/staff/membre") {
         const nom = params.get("nom") || "";
         const grade = params.get("grade") || "Mécanicien";
-        if (nom) {
-          data.effectif.push({ nom: nom, grade: grade, actif: true });
-          saveData(data);
-          await log("➕ " + nom + " ajouté à l'effectif (" + grade + ")");
-        }
+        if (nom) { data.effectif.push({ nom: nom, grade: grade, actif: true }); saveData(data); }
       }
-
       if (url === "/staff/mise-en-avant") {
         data.miseEnAvant = {
           employeSemaine: params.get("employeSemaine") || "",
@@ -1072,12 +1308,7 @@ const server = http.createServer(async (req, res) => {
         };
         saveData(data);
       }
-
-      if (url === "/staff/publier-mise-en-avant") {
-        data.miseEnAvantPublieeLe = new Date().toLocaleString("fr-FR");
-        saveData(data);
-        await log("📤 Mise en avant publiée sur le site (" + data.miseEnAvantPublieeLe + ")");
-      }
+      if (url === "/staff/publier-mise-en-avant") { data.miseEnAvantPublieeLe = new Date().toLocaleString("fr-FR"); saveData(data); }
 
       res.writeHead(302, { Location: "/staff" });
       return res.end();
@@ -1109,7 +1340,6 @@ server.listen(PORT, () => console.log("🌐 Serveur webhook + dashboard sur le p
 client.once("ready", async () => {
   botReady = true;
   botTag = client.user.tag;
-
   try {
     const distant = await githubLoad();
     if (distant && typeof distant === "object") {
@@ -1121,7 +1351,6 @@ client.once("ready", async () => {
   } catch (e) {
     console.error("Chargement GitHub impossible :", e.message);
   }
-
   console.log("✅ Bot Benny's connecté en tant que " + client.user.tag);
   try {
     const rest = new REST({ version: "10" }).setToken(TOKEN);
