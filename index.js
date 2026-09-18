@@ -1,5 +1,5 @@
 // ============================================================
-//  BOT DISCORD BENNY'S — espace staff web + /clear
+//  BOT DISCORD BENNY'S — Dashboard complet (/staff)
 // ============================================================
 
 const fs = require("fs");
@@ -30,13 +30,34 @@ const STAFF_PASSWORD = process.env.STAFF_PASSWORD || "bennys2026";
 
 const DATA_FILE = path.join(__dirname, "bennys_data.json");
 
+const DEFAULT_DATA = {
+  ouvert: false,
+  effectif: [],
+  candidatures: {},
+  tarifs: [
+    ["Réparation", "1000$"],
+    ["Dépannage Sud", "1000$"],
+    ["Dépannage Nord", "1400$"],
+    ["Kit réparation / nettoyage", "500$"],
+  ],
+  partenaires: [
+    ["Burger Shot", "Partenaire officiel"],
+    ["BCSO", "Partenaire officiel"],
+  ],
+};
+
 function loadData() {
+  let data = Object.assign({}, DEFAULT_DATA);
   if (fs.existsSync(DATA_FILE)) {
     try {
-      return JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+      const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+      data = Object.assign(data, saved);
     } catch {}
   }
-  return { ouvert: false, effectif: [], candidatures: {} };
+  if (!Array.isArray(data.tarifs) || !data.tarifs.length) data.tarifs = DEFAULT_DATA.tarifs;
+  if (!Array.isArray(data.partenaires) || !data.partenaires.length)
+    data.partenaires = DEFAULT_DATA.partenaires;
+  return data;
 }
 
 function saveData(data) {
@@ -46,18 +67,6 @@ function saveData(data) {
     console.error("Sauvegarde impossible :", e.message);
   }
 }
-
-const TARIFS = [
-  ["Réparation", "1000$"],
-  ["Dépannage Nord", "1400$"],
-  ["Dépannage Sud", "1000$"],
-  ["Kit réparation/nettoyage", "500$"],
-];
-
-const PARTENAIRES = [
-  ["Burger Shot", "Partenaire officiel"],
-  ["BCSO", "Partenaire officiel"],
-];
 
 const POSTES = [
   "Apprenti Mécanicien",
@@ -78,6 +87,9 @@ const client = new Client({
   ],
   partials: [Partials.Channel],
 });
+
+let botReady = false;
+let botTag = "hors ligne";
 
 async function log(texte) {
   if (!SALON_LOGS_ID || SALON_LOGS_ID === "0") return;
@@ -102,6 +114,7 @@ function candidatureButtons(candidatId) {
 
 function hasPermission(member) {
   if (!ROLE_RECRUTEUR_ID || ROLE_RECRUTEUR_ID === "0") return true;
+  if (!member || !member.roles) return false;
   return member.roles.cache.has(ROLE_RECRUTEUR_ID);
 }
 
@@ -165,6 +178,9 @@ async function traiterCandidature(candidatId, accepter, guild) {
   return { nomRp, poste, mpOk };
 }
 
+// ============================================================
+//  DISCORD
+// ============================================================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
 
@@ -206,15 +222,12 @@ client.on("interactionCreate", async (interaction) => {
   });
   await log(
     (action === "accept" ? "✅ " : "❌ ") +
-      "Candidature de " +
-      res.nomRp +
+      "Candidature de " + res.nomRp +
       (action === "accept" ? " acceptée" : " refusée") +
-      " par " +
-      interaction.user.tag
+      " par " + interaction.user.tag
   );
 });
 
-// --- Commandes slash ----------------------------------------
 const commands = [
   new SlashCommandBuilder().setName("ouvert").setDescription("Ouvrir le garage"),
   new SlashCommandBuilder().setName("ferme").setDescription("Fermer le garage"),
@@ -223,6 +236,7 @@ const commands = [
   new SlashCommandBuilder().setName("stats").setDescription("Statistiques du garage"),
   new SlashCommandBuilder().setName("partenaires").setDescription("Liste des partenaires"),
   new SlashCommandBuilder().setName("tarifs").setDescription("Tarifs du garage"),
+  new SlashCommandBuilder().setName("dashboard").setDescription("Lien du tableau de bord web (staff)"),
   new SlashCommandBuilder()
     .setName("joueur")
     .setDescription("Marquer un joueur en service")
@@ -256,6 +270,15 @@ client.on("interactionCreate", async (interaction) => {
     saveData(data);
     await interaction.reply("🔴 Benny's est **FERMÉ**.");
     return log("🔴 Fermé par " + interaction.user.tag);
+  }
+  if (cmd === "dashboard") {
+    return interaction.reply({
+      content:
+        "📊 **Tableau de bord Benny's**\n" +
+        "https://bennys-bot-production.up.railway.app/staff\n" +
+        "_(accès protégé par mot de passe)_",
+      ephemeral: true,
+    });
   }
   if (cmd === "recrutement") {
     const embed = new EmbedBuilder()
@@ -306,7 +329,7 @@ client.on("interactionCreate", async (interaction) => {
         new EmbedBuilder()
           .setTitle("🤝 Partenaires")
           .setColor(0xff6a00)
-          .setDescription(PARTENAIRES.map((p) => "**" + p[0] + "** — " + p[1]).join("\n")),
+          .setDescription(data.partenaires.map((p) => "**" + p[0] + "** — " + p[1]).join("\n")),
       ],
     });
   }
@@ -316,7 +339,7 @@ client.on("interactionCreate", async (interaction) => {
         new EmbedBuilder()
           .setTitle("💰 Tarifs Benny's")
           .setColor(0xff6a00)
-          .addFields(...TARIFS.map((t) => ({ name: t[0], value: t[1], inline: true }))),
+          .addFields(...data.tarifs.map((t) => ({ name: t[0], value: t[1], inline: true }))),
       ],
     });
   }
@@ -326,101 +349,106 @@ client.on("interactionCreate", async (interaction) => {
     return log("🔧 " + m.tag + " en service");
   }
   if (cmd === "clear") {
-    if (ROLE_RECRUTEUR_ID && ROLE_RECRUTEUR_ID !== "0") {
-      const roles = interaction.member ? interaction.member.roles.cache : null;
-      if (!roles || !roles.has(ROLE_RECRUTEUR_ID)) {
-        return interaction.reply({
-          content: "❌ Tu n'as pas la permission d'utiliser cette commande.",
-          ephemeral: true,
-        });
-      }
+    if (!hasPermission(interaction.member)) {
+      return interaction.reply({
+        content: "❌ Tu n'as pas la permission d'utiliser cette commande.",
+        ephemeral: true,
+      });
     }
-
     const nombre = interaction.options.getInteger("nombre");
     try {
       await interaction.deferReply({ ephemeral: true });
       const supprimes = await interaction.channel.bulkDelete(nombre, true);
       await interaction.editReply("🧹 " + supprimes.size + " message(s) supprimé(s).");
       return log(
-        "🧹 " +
-          supprimes.size +
-          " messages supprimés dans #" +
-          interaction.channel.name +
-          " par " +
-          interaction.user.tag
+        "🧹 " + supprimes.size + " messages supprimés dans #" + interaction.channel.name + " par " + interaction.user.tag
       );
     } catch (e) {
       return interaction.editReply(
-        "❌ Suppression impossible : " +
-          e.message +
-          "\n(Les messages de plus de 14 jours ne peuvent pas être supprimés en masse.)"
+        "❌ Suppression impossible : " + e.message + "\n(Les messages de plus de 14 jours ne peuvent pas être supprimés en masse.)"
       );
     }
   }
 });
 
 // ============================================================
-//  PAGES WEB : accueil + espace staff
+//  DASHBOARD WEB
 // ============================================================
 function pageHtml(titre, corps) {
   return (
     "<!DOCTYPE html><html lang='fr'><head><meta charset='UTF-8'>" +
     "<meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
-    "<title>" +
-    titre +
-    "</title><style>" +
+    "<title>" + titre + "</title><style>" +
     "body{background:#0b0b0d;color:#f4f4f5;font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;line-height:1.6}" +
-    ".wrap{max-width:900px;margin:0 auto;padding:40px 20px}" +
-    "h1{color:#ff6a00;font-size:1.6rem}" +
-    ".card{background:#1c1c1f;border:1px solid #2a2a2e;border-radius:12px;padding:22px;margin-bottom:16px}" +
-    ".card h3{margin:0 0 8px;font-size:1.1rem}" +
-    ".muted{color:#8a8a90;font-size:.88rem}" +
-    ".btn{display:inline-block;background:#ff6a00;color:#0b0b0d;border:none;border-radius:6px;padding:10px 18px;font-weight:700;cursor:pointer;font-size:.9rem;margin-right:8px;text-decoration:none}" +
+    ".wrap{max-width:1000px;margin:0 auto;padding:32px 20px 60px}" +
+    "h1{color:#ff6a00;font-size:1.5rem;margin:0 0 4px}" +
+    "h2{font-size:1.05rem;margin:0 0 14px;color:#fff}" +
+    ".top{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px}" +
+    ".muted{color:#8a8a90;font-size:.86rem;margin:0}" +
+    ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:26px}" +
+    ".stat{background:#1c1c1f;border:1px solid #2a2a2e;border-radius:12px;padding:18px;text-align:center}" +
+    ".stat b{display:block;font-size:1.7rem;color:#ff6a00;font-weight:900}" +
+    ".stat span{color:#8a8a90;font-size:.75rem;text-transform:uppercase;letter-spacing:1px}" +
+    ".card{background:#1c1c1f;border:1px solid #2a2a2e;border-radius:12px;padding:20px;margin-bottom:16px}" +
+    ".btn{display:inline-block;background:#ff6a00;color:#0b0b0d;border:none;border-radius:6px;padding:9px 16px;font-weight:700;cursor:pointer;font-size:.85rem;margin:0 6px 6px 0;text-decoration:none}" +
+    ".btn.sec{background:transparent;border:1px solid #555;color:#bbb}" +
     ".btn.refuse{background:#c0392b;color:#fff}" +
-    ".badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:700}" +
+    ".btn.ok{background:#2ecc71;color:#0b0b0d}" +
+    ".badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:700}" +
     ".b-attente{background:rgba(255,170,0,.15);color:#ffaa00}" +
     ".b-accepte{background:rgba(46,204,113,.15);color:#2ecc71}" +
     ".b-refuse{background:rgba(192,57,43,.15);color:#e74c3c}" +
-    "input,select{width:100%;padding:11px;border-radius:7px;border:1px solid #2a2a2e;background:#0b0b0d;color:#fff;box-sizing:border-box;margin-bottom:12px}" +
-    "</style></head><body><div class='wrap'>" +
-    corps +
-    "</div></body></html>"
+    "input,select{width:100%;padding:10px;border-radius:7px;border:1px solid #2a2a2e;background:#0b0b0d;color:#fff;box-sizing:border-box;margin-bottom:10px;font-family:inherit}" +
+    ".row{display:flex;gap:16px;flex-wrap:wrap} .row>div{flex:1;min-width:260px}" +
+    "</style></head><body><div class='wrap'>" + corps + "</div></body></html>"
   );
 }
 
-function renderStaffPage(erreur) {
+function renderDashboard() {
   const data = loadData();
   const liste = Object.entries(data.candidatures).reverse();
+  const acc = liste.filter((c) => c[1].statut === "accepte").length;
+  const ref = liste.filter((c) => c[1].statut === "refuse").length;
+  const att = liste.length - acc - ref;
 
   let html =
-    "<h1>🔧 Espace Staff — Benny's</h1>" +
-    "<p class='muted'>" +
-    liste.length +
-    " candidature(s) • Effectif : " +
-    data.effectif.length +
-    " • Garage : " +
-    (data.ouvert ? "ouvert" : "fermé") +
-    "</p>" +
-    "<div class='card'><h3>➕ Ajouter une candidature à la main</h3>" +
+    "<div class='top'><div><h1>🔧 Tableau de bord — Benny's</h1>" +
+    "<p class='muted'>Bot : " + botTag + " • " + (botReady ? "connecté ✅" : "hors ligne ⚠️") + "</p></div>" +
+    "<div><a class='btn sec' href='/staff'>Rafraîchir</a><a class='btn sec' href='/staff/logout'>Déconnexion</a></div></div>" +
+
+    "<div class='grid'>" +
+    "<div class='stat'><b>" + liste.length + "</b><span>Candidatures</span></div>" +
+    "<div class='stat'><b>" + att + "</b><span>En attente</span></div>" +
+    "<div class='stat'><b>" + acc + "</b><span>Acceptées</span></div>" +
+    "<div class='stat'><b>" + ref + "</b><span>Refusées</span></div>" +
+    "<div class='stat'><b>" + data.effectif.length + "</b><span>Effectif</span></div>" +
+    "<div class='stat'><b>" + (data.ouvert ? "OUVERT" : "FERMÉ") + "</b><span>Garage</span></div>" +
+    "</div>" +
+
+    "<div class='card'><h2>🚦 Contrôle du garage</h2>" +
+    "<form method='POST' action='/staff/garage' style='display:inline'>" +
+    "<input type='hidden' name='etat' value='ouvert'><button class='btn ok' type='submit'>🟢 Ouvrir le garage</button></form>" +
+    "<form method='POST' action='/staff/garage' style='display:inline'>" +
+    "<input type='hidden' name='etat' value='ferme'><button class='btn refuse' type='submit'>🔴 Fermer le garage</button></form>" +
+    "</div>" +
+
+    "<div class='card'><h2>➕ Ajouter une candidature à la main</h2>" +
     "<form method='POST' action='/staff/ajouter'>" +
-    "<input type='text' name='nom_rp' placeholder='Nom / Prénom RP' required>" +
+    "<div class='row'><div><input type='text' name='nom_rp' placeholder='Nom / Prénom RP' required>" +
     "<input type='text' name='discord' placeholder='Pseudo Discord'>" +
-    "<input type='text' name='age' placeholder='Âge RP'>" +
-    "<select name='poste'>" +
+    "<input type='text' name='age' placeholder='Âge RP'></div>" +
+    "<div><select name='poste'>" +
     POSTES.map((p) => "<option value='" + p + "'>" + p + "</option>").join("") +
-    "</select>" +
-    "<input type='text' name='dispo' placeholder='Disponibilités'>" +
-    "<input type='text' name='motivation' placeholder='Motivation'>" +
-    "<button class='btn' type='submit'>Ajouter la candidature</button>" +
-    "</form></div>";
+    "</select><input type='text' name='dispo' placeholder='Disponibilités'>" +
+    "<input type='text' name='motivation' placeholder='Motivation'></div></div>" +
+    "<button class='btn' type='submit'>Ajouter la candidature</button></form></div>";
 
-  if (erreur) html += "<div class='card' style='border-color:#c0392b'><b>" + erreur + "</b></div>";
+  html += "<div class='card'><h2>📋 Candidatures</h2>";
+  if (!liste.length) html += "<p class='muted'>Aucune candidature pour le moment.</p>";
 
-  if (!liste.length) {
-    html += "<div class='card'><p class='muted'>Aucune candidature pour le moment.</p></div>";
-  }
-
-  for (const [id, c] of liste) {
+  for (const item of liste) {
+    const id = item[0];
+    const c = item[1];
     const statut =
       c.statut === "accepte"
         ? "<span class='badge b-accepte'>Accepté</span>"
@@ -429,42 +457,75 @@ function renderStaffPage(erreur) {
         : "<span class='badge b-attente'>En attente</span>";
 
     html +=
-      "<div class='card'><h3>" +
-      (c.nom_rp || "Sans nom") +
-      " — " +
-      (c.poste || "Poste inconnu") +
-      " " +
-      statut +
-      "</h3>" +
-      "<p class='muted'>Discord : " +
-      (c.discord || "-") +
-      " • Âge RP : " +
-      (c.age || "-") +
-      "</p>" +
-      "<p>" +
-      (c.motivation || "") +
-      "</p>";
+      "<div style='border-bottom:1px solid #2a2a2e;padding:12px 0'>" +
+      "<b>" + (c.nom_rp || "Sans nom") + "</b> — " + (c.poste || "?") + " " + statut +
+      "<br><span class='muted'>Discord : " + (c.discord || "-") + " • Âge : " + (c.age || "-") + "</span>" +
+      (c.motivation ? "<br><span class='muted'>" + c.motivation + "</span>" : "");
 
+    html += "<div style='margin-top:8px'>";
     if (c.statut === "en_attente") {
       html +=
         "<form method='POST' action='/staff/decision' style='display:inline'>" +
-        "<input type='hidden' name='id' value='" +
-        id +
-        "'>" +
+        "<input type='hidden' name='id' value='" + id + "'>" +
         "<input type='hidden' name='decision' value='accepte'>" +
-        "<button class='btn' type='submit'>✅ Accepter</button></form>" +
+        "<button class='btn ok' type='submit'>✅ Accepter</button></form>" +
         "<form method='POST' action='/staff/decision' style='display:inline'>" +
-        "<input type='hidden' name='id' value='" +
-        id +
-        "'>" +
+        "<input type='hidden' name='id' value='" + id + "'>" +
         "<input type='hidden' name='decision' value='refuse'>" +
         "<button class='btn refuse' type='submit'>❌ Refuser</button></form>";
     }
-
-    html += "</div>";
+    html +=
+      "<form method='POST' action='/staff/supprimer' style='display:inline'>" +
+      "<input type='hidden' name='id' value='" + id + "'>" +
+      "<button class='btn sec' type='submit'>🗑 Supprimer</button></form></div></div>";
   }
+  html += "</div>";
 
-  return pageHtml("Espace Staff Benny's", html);
+  html += "<div class='card'><h2>👥 Effectif</h2>";
+  if (!data.effectif.length) html += "<p class='muted'>Aucun membre enregistré.</p>";
+  data.effectif.forEach((m, i) => {
+    html +=
+      "<div style='border-bottom:1px solid #2a2a2e;padding:8px 0;display:flex;justify-content:space-between;align-items:center'>" +
+      "<span>" + m + "</span>" +
+      "<form method='POST' action='/staff/retirer'>" +
+      "<input type='hidden' name='index' value='" + i + "'>" +
+      "<button class='btn sec' type='submit'>Retirer</button></form></div>";
+  });
+  html += "</div>";
+
+  html += "<div class='card'><h2>💰 Tarifs</h2>";
+  data.tarifs.forEach((t, i) => {
+    html +=
+      "<form method='POST' action='/staff/tarif' style='display:flex;gap:8px;margin-bottom:8px'>" +
+      "<input type='hidden' name='index' value='" + i + "'>" +
+      "<input type='text' name='nom' value='" + t[0] + "'>" +
+      "<input type='text' name='prix' value='" + t[1] + "' style='max-width:130px'>" +
+      "<button class='btn' type='submit'>OK</button></form>";
+  });
+  html +=
+    "<form method='POST' action='/staff/tarif' style='display:flex;gap:8px;margin-top:12px'>" +
+    "<input type='hidden' name='index' value='new'>" +
+    "<input type='text' name='nom' placeholder='Nouvelle prestation'>" +
+    "<input type='text' name='prix' placeholder='Prix' style='max-width:130px'>" +
+    "<button class='btn' type='submit'>Ajouter</button></form></div>";
+
+  html += "<div class='card'><h2>🤝 Partenaires</h2>";
+  data.partenaires.forEach((p, i) => {
+    html +=
+      "<form method='POST' action='/staff/partenaire' style='display:flex;gap:8px;margin-bottom:8px'>" +
+      "<input type='hidden' name='index' value='" + i + "'>" +
+      "<input type='text' name='nom' value='" + p[0] + "'>" +
+      "<input type='text' name='desc' value='" + p[1] + "'>" +
+      "<button class='btn' type='submit'>OK</button></form>";
+  });
+  html +=
+    "<form method='POST' action='/staff/partenaire' style='display:flex;gap:8px;margin-top:12px'>" +
+    "<input type='hidden' name='index' value='new'>" +
+    "<input type='text' name='nom' placeholder='Nouveau partenaire'>" +
+    "<input type='text' name='desc' placeholder='Description'>" +
+    "<button class='btn' type='submit'>Ajouter</button></form></div>";
+
+  return pageHtml("Dashboard Benny's", html);
 }
 
 function renderLoginPage(erreur) {
@@ -485,9 +546,14 @@ function parseBody(req, cb) {
   req.on("end", () => cb(body));
 }
 
+function isLogged(req) {
+  return (req.headers.cookie || "").includes("bennys_staff=ok");
+}
+
 const server = http.createServer(async (req, res) => {
   const url = req.url.split("?")[0];
 
+  // --- Candidatures du site ---
   if (req.method === "POST" && url === "/candidature-webhook") {
     return parseBody(req, async (body) => {
       let p;
@@ -533,7 +599,7 @@ const server = http.createServer(async (req, res) => {
                   { name: "Expérience", value: p.experience || "-", inline: false },
                   { name: "Motivation", value: p.motivation || "-", inline: false }
                 )
-                .setFooter({ text: "Traiter aussi depuis le site : /staff" });
+                .setFooter({ text: "Tableau de bord : /staff" });
               await salon.send({ embeds: [embed] });
             }
           } catch (e) {
@@ -550,70 +616,119 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // --- Connexion ---
   if (req.method === "POST" && url === "/staff") {
     return parseBody(req, (body) => {
-      const params = new URLSearchParams(body);
-      const mdp = params.get("mdp") || "";
+      const mdp = new URLSearchParams(body).get("mdp") || "";
       if (mdp === STAFF_PASSWORD) {
         res.writeHead(200, {
           "Content-Type": "text/html; charset=utf-8",
           "Set-Cookie": "bennys_staff=ok; Path=/; HttpOnly; SameSite=Lax",
         });
-        return res.end(renderStaffPage());
+        return res.end(renderDashboard());
       }
       res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
       return res.end(renderLoginPage("Mot de passe incorrect."));
     });
   }
 
-  if (req.method === "POST" && url === "/staff/ajouter") {
-    return parseBody(req, async (body) => {
-      const params = new URLSearchParams(body);
-      const nomRp = params.get("nom_rp") || "-";
-      const poste = params.get("poste") || "Apprenti Mécanicien";
-      const id = "m" + Date.now();
+  const actions = [
+    "/staff/ajouter",
+    "/staff/decision",
+    "/staff/supprimer",
+    "/staff/retirer",
+    "/staff/tarif",
+    "/staff/partenaire",
+    "/staff/garage",
+  ];
 
-      const data = loadData();
-      data.candidatures[id] = {
-        nom_rp: nomRp,
-        discord: params.get("discord") || "-",
-        age: params.get("age") || "-",
-        poste: poste,
-        dispo: params.get("dispo") || "-",
-        experience: "-",
-        motivation: params.get("motivation") || "-",
-        statut: "en_attente",
-      };
-      saveData(data);
-      await log("➕ Candidature ajoutée à la main : " + nomRp + " — " + poste);
-
+  if (req.method === "POST" && actions.indexOf(url) !== -1) {
+    if (!isLogged(req)) {
       res.writeHead(302, { Location: "/staff" });
       return res.end();
-    });
-  }
-
-  if (req.method === "POST" && url === "/staff/decision") {
+    }
     return parseBody(req, async (body) => {
       const params = new URLSearchParams(body);
-      const id = params.get("id");
-      const decision = params.get("decision");
-
       const data = loadData();
-      const c = data.candidatures[id];
-      if (c) {
-        c.statut = decision === "accepte" ? "accepte" : "refuse";
-        if (decision === "accepte") {
-          const entry = (c.nom_rp || "candidat") + " — " + (c.poste || "poste");
-          if (!data.effectif.includes(entry)) data.effectif.push(entry);
+
+      if (url === "/staff/ajouter") {
+        const nomRp = params.get("nom_rp") || "-";
+        const poste = params.get("poste") || "Apprenti Mécanicien";
+        data.candidatures["m" + Date.now()] = {
+          nom_rp: nomRp,
+          discord: params.get("discord") || "-",
+          age: params.get("age") || "-",
+          poste: poste,
+          dispo: params.get("dispo") || "-",
+          experience: "-",
+          motivation: params.get("motivation") || "-",
+          statut: "en_attente",
+        };
+        saveData(data);
+        await log("➕ Candidature ajoutée à la main : " + nomRp + " — " + poste);
+      }
+
+      if (url === "/staff/decision") {
+        const c = data.candidatures[params.get("id")];
+        const decision = params.get("decision");
+        if (c) {
+          c.statut = decision === "accepte" ? "accepte" : "refuse";
+          if (decision === "accepte") {
+            const entry = (c.nom_rp || "candidat") + " — " + (c.poste || "poste");
+            if (data.effectif.indexOf(entry) === -1) data.effectif.push(entry);
+          }
+          saveData(data);
+          await log(
+            (decision === "accepte" ? "✅ " : "❌ ") +
+              "Candidature de " + (c.nom_rp || "candidat") +
+              (decision === "accepte" ? " acceptée" : " refusée") + " depuis le dashboard"
+          );
+        }
+      }
+
+      if (url === "/staff/supprimer") {
+        delete data.candidatures[params.get("id")];
+        saveData(data);
+      }
+
+      if (url === "/staff/retirer") {
+        const i = parseInt(params.get("index"), 10);
+        if (!isNaN(i)) {
+          data.effectif.splice(i, 1);
+          saveData(data);
+        }
+      }
+
+      if (url === "/staff/tarif") {
+        const i = params.get("index");
+        const nom = params.get("nom") || "";
+        const prix = params.get("prix") || "";
+        if (i === "new") {
+          if (nom) data.tarifs.push([nom, prix || "-"]);
+        } else {
+          const idx = parseInt(i, 10);
+          if (!isNaN(idx) && data.tarifs[idx]) data.tarifs[idx] = [nom, prix];
         }
         saveData(data);
-        await log(
-          (decision === "accepte" ? "✅ " : "❌ ") +
-            "Candidature de " +
-            (c.nom_rp || "candidat") +
-            (decision === "accepte" ? " acceptée" : " refusée") +
-            " depuis l'espace staff"
-        );
+      }
+
+      if (url === "/staff/partenaire") {
+        const i = params.get("index");
+        const nom = params.get("nom") || "";
+        const desc = params.get("desc") || "";
+        if (i === "new") {
+          if (nom) data.partenaires.push([nom, desc || "Partenaire officiel"]);
+        } else {
+          const idx = parseInt(i, 10);
+          if (!isNaN(idx) && data.partenaires[idx]) data.partenaires[idx] = [nom, desc];
+        }
+        saveData(data);
+      }
+
+      if (url === "/staff/garage") {
+        data.ouvert = params.get("etat") === "ouvert";
+        saveData(data);
+        await log("🚦 Garage " + (data.ouvert ? "OUVERT" : "FERMÉ") + " depuis le dashboard");
       }
 
       res.writeHead(302, { Location: "/staff" });
@@ -621,14 +736,17 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  if (url === "/staff/logout") {
+    res.writeHead(302, {
+      Location: "/staff",
+      "Set-Cookie": "bennys_staff=; Path=/; Max-Age=0",
+    });
+    return res.end();
+  }
+
   if (url === "/staff") {
-    const cookie = req.headers.cookie || "";
-    if (!cookie.includes("bennys_staff=ok")) {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      return res.end(renderLoginPage());
-    }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    return res.end(renderStaffPage());
+    return res.end(isLogged(req) ? renderDashboard() : renderLoginPage());
   }
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -637,21 +755,21 @@ const server = http.createServer(async (req, res) => {
       "Bot Benny's",
       "<h1>🔧 Bot Benny's</h1>" +
         "<div class='card'><b>Bot Benny's en ligne ✅</b>" +
-        "<p class='muted'>Espace staff : <a href='/staff' style='color:#ff6a00'>/staff</a></p></div>"
+        "<p class='muted'>Tableau de bord : <a href='/staff' style='color:#ff6a00'>/staff</a></p></div>"
     )
   );
 });
 
-server.listen(PORT, () => console.log("🌐 Serveur webhook + espace staff sur le port " + PORT));
+server.listen(PORT, () => console.log("🌐 Serveur webhook + dashboard sur le port " + PORT));
 
 client.once("ready", async () => {
+  botReady = true;
+  botTag = client.user.tag;
   console.log("✅ Bot Benny's connecté en tant que " + client.user.tag);
   try {
     const rest = new REST({ version: "10" }).setToken(TOKEN);
     if (GUILD_ID && GUILD_ID !== "0") {
-      await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), {
-        body: commands,
-      });
+      await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
     } else {
       await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
     }
