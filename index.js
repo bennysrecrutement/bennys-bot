@@ -1,5 +1,6 @@
 // ============================================================
-//  BOT DISCORD BENNY'S — Dashboard + synchronisation du site
+//  BOT DISCORD BENNY'S
+//  Dashboard + sauvegarde persistante + grades + mise en avant
 // ============================================================
 
 const fs = require("fs");
@@ -29,12 +30,69 @@ const STAFF_PASSWORD = process.env.STAFF_PASSWORD || "bennys2026";
 
 const DATA_FILE = path.join(__dirname, "bennys_data.json");
 
+// --- Sauvegarde persistante sur GitHub (survit aux redeploiements) ---
+const GH_TOKEN = (process.env.GH_TOKEN || "").trim();
+const GH_OWNER = (process.env.GH_OWNER || "bennysrecrutement").trim();
+const GH_REPO = (process.env.GH_REPO || "bennys-bot").trim();
+const GH_PATH = "bennys_data.json";
+let ghSha = null;
+
+async function githubLoad() {
+  if (!GH_TOKEN) return null;
+  try {
+    const r = await fetch(
+      "https://api.github.com/repos/" + GH_OWNER + "/" + GH_REPO + "/contents/" + GH_PATH,
+      { headers: { Authorization: "Bearer " + GH_TOKEN, "User-Agent": "bennys-bot" } }
+    );
+    if (!r.ok) return null;
+    const j = await r.json();
+    ghSha = j.sha;
+    return JSON.parse(Buffer.from(j.content, "base64").toString("utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+async function githubSave(data) {
+  if (!GH_TOKEN) return;
+  try {
+    const body = {
+      message: "Mise a jour des donnees Benny's " + new Date().toISOString(),
+      content: Buffer.from(JSON.stringify(data, null, 2), "utf-8").toString("base64"),
+    };
+    if (ghSha) body.sha = ghSha;
+    const r = await fetch(
+      "https://api.github.com/repos/" + GH_OWNER + "/" + GH_REPO + "/contents/" + GH_PATH,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: "Bearer " + GH_TOKEN,
+          "User-Agent": "bennys-bot",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }
+    );
+    if (r.ok) {
+      const j = await r.json();
+      if (j.content && j.content.sha) ghSha = j.content.sha;
+    }
+  } catch (e) {
+    console.error("Sauvegarde GitHub impossible :", e.message);
+  }
+}
+
 const DEFAULT_DATA = {
   ouvert: false,
   effectif: [],
   candidatures: {},
-  tarifsPubliesLe: "jamais",
-  partenairesPubliesLe: "jamais",
+  miseEnAvant: {
+    employeMois: "",
+    meilleurMecano: "",
+    meilleurDepanneur: "",
+    meilleureSatisfaction: "",
+  },
+  miseEnAvantPublieeLe: "jamais",
   tarifs: [
     ["Réparation", "1000$"],
     ["Dépannage Sud", "1000$"],
@@ -51,12 +109,32 @@ function loadData() {
   let data = Object.assign({}, DEFAULT_DATA);
   if (fs.existsSync(DATA_FILE)) {
     try {
-      data = Object.assign(data, JSON.parse(fs.readFileSync(DATA_FILE, "utf-8")));
+      const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+      data = Object.assign(data, saved);
     } catch {}
   }
   if (!Array.isArray(data.tarifs) || !data.tarifs.length) data.tarifs = DEFAULT_DATA.tarifs;
   if (!Array.isArray(data.partenaires) || !data.partenaires.length)
     data.partenaires = DEFAULT_DATA.partenaires;
+
+  // Migration : ancien format texte -> objet {nom, grade, actif}
+  if (Array.isArray(data.effectif)) {
+    data.effectif = data.effectif.map(function (m) {
+      if (typeof m === "string") {
+        const parts = m.split(" — ");
+        return { nom: parts[0] || m, grade: parts[1] || "Mécanicien", actif: true };
+      }
+      if (!m || typeof m !== "object") return { nom: String(m), grade: "Mécanicien", actif: true };
+      return {
+        nom: m.nom || "Membre",
+        grade: m.grade || "Mécanicien",
+        actif: m.actif !== false,
+      };
+    });
+  }
+  if (!data.miseEnAvant || typeof data.miseEnAvant !== "object") {
+    data.miseEnAvant = DEFAULT_DATA.miseEnAvant;
+  }
   return data;
 }
 
@@ -64,8 +142,11 @@ function saveData(data) {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf-8");
   } catch (e) {
-    console.error("Sauvegarde impossible :", e.message);
+    console.error("Sauvegarde locale impossible :", e.message);
   }
+  githubSave(data).catch(function (e) {
+    console.error("Sauvegarde GitHub :", e.message);
+  });
 }
 
 const POSTES = [
@@ -128,10 +209,8 @@ async function traiterCandidature(candidatId, accepter, guild) {
   let mpOk = false;
 
   if (accepter) {
-    if (membre) {
-      const entry = membre.user.tag + " (" + nomRp + ") — " + poste;
-      if (!data.effectif.includes(entry)) data.effectif.push(entry);
-    }
+    const dejaLa = data.effectif.some((m) => m.nom && m.nom.indexOf(nomRp) !== -1);
+    if (!dejaLa) data.effectif.push({ nom: nomRp, grade: poste, actif: true });
     if (candidature) candidature.statut = "accepte";
     saveData(data);
     if (membre) {
@@ -216,6 +295,7 @@ const commands = [
   new SlashCommandBuilder().setName("partenaires").setDescription("Liste des partenaires"),
   new SlashCommandBuilder().setName("tarifs").setDescription("Tarifs du garage"),
   new SlashCommandBuilder().setName("dashboard").setDescription("Lien du tableau de bord web (staff)"),
+  new SlashCommandBuilder().setName("mise-en-avant").setDescription("Afficher les employés mis en avant"),
   new SlashCommandBuilder()
     .setName("joueur")
     .setDescription("Marquer un joueur en service")
@@ -257,6 +337,19 @@ client.on("interactionCreate", async (interaction) => {
       ephemeral: true,
     });
   }
+  if (cmd === "mise-en-avant") {
+    const mvp = data.miseEnAvant || {};
+    const lignes = [];
+    if (mvp.employeMois) lignes.push("👑 **Employé du mois** : " + mvp.employeMois);
+    if (mvp.meilleurMecano) lignes.push("🔧 **Meilleur mécanicien** : " + mvp.meilleurMecano);
+    if (mvp.meilleurDepanneur) lignes.push("🚗 **Meilleur dépanneur** : " + mvp.meilleurDepanneur);
+    if (mvp.meilleureSatisfaction) lignes.push("⭐ **Meilleure satisfaction client** : " + mvp.meilleureSatisfaction);
+    const embed = new EmbedBuilder()
+      .setTitle("🏆 Mise en avant — Benny's")
+      .setColor(0xff6a00)
+      .setDescription(lignes.length ? lignes.join("\n") : "Aucune mise en avant pour le moment.");
+    return interaction.reply({ embeds: [embed] });
+  }
   if (cmd === "recrutement") {
     return interaction.reply({
       embeds: [
@@ -279,7 +372,19 @@ client.on("interactionCreate", async (interaction) => {
         new EmbedBuilder()
           .setTitle("👥 Effectif Benny's")
           .setColor(0xff6a00)
-          .setDescription(data.effectif.map((m) => "• " + m).join("\n")),
+          .setDescription(
+            data.effectif
+              .map(
+                (m) =>
+                  "• " +
+                  (m.actif === false ? "~~" : "") +
+                  m.nom +
+                  " — " +
+                  m.grade +
+                  (m.actif === false ? "~~ (inactif)" : "")
+              )
+              .join("\n")
+          ),
       ],
     });
   }
@@ -287,6 +392,7 @@ client.on("interactionCreate", async (interaction) => {
     const list = Object.values(data.candidatures);
     const acc = list.filter((c) => c.statut === "accepte").length;
     const ref = list.filter((c) => c.statut === "refuse").length;
+    const actifs = data.effectif.filter((m) => m.actif !== false).length;
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
@@ -297,7 +403,7 @@ client.on("interactionCreate", async (interaction) => {
             { name: "✅ Acceptées", value: String(acc), inline: true },
             { name: "❌ Refusées", value: String(ref), inline: true },
             { name: "⏳ En attente", value: String(list.length - acc - ref), inline: true },
-            { name: "👥 Effectif", value: String(data.effectif.length), inline: true },
+            { name: "👥 Effectif", value: String(data.effectif.length) + " (" + actifs + " actifs)", inline: true },
             { name: "🟢 Garage", value: data.ouvert ? "Ouvert" : "Fermé", inline: true }
           ),
       ],
@@ -383,17 +489,19 @@ function renderDashboard() {
   const acc = liste.filter((c) => c[1].statut === "accepte").length;
   const ref = liste.filter((c) => c[1].statut === "refuse").length;
   const att = liste.length - acc - ref;
+  const actifs = (data.effectif || []).filter((m) => m.actif !== false).length;
 
   let html =
     "<div class='top'><div><h1>🔧 Tableau de bord — Benny's</h1>" +
-    "<p class='muted'>Bot : " + botTag + " • " + (botReady ? "connecté ✅" : "hors ligne ⚠️") + "</p></div>" +
+    "<p class='muted'>Bot : " + botTag + " • " + (botReady ? "connecté ✅" : "hors ligne ⚠️") +
+    " • Sauvegarde : " + (GH_TOKEN ? "GitHub active ✅" : "locale seulement ⚠️") + "</p></div>" +
     "<div><a class='btn sec' href='/staff'>Rafraîchir</a><a class='btn sec' href='/staff/logout'>Déconnexion</a></div></div>" +
     "<div class='grid'>" +
     "<div class='stat'><b>" + liste.length + "</b><span>Candidatures</span></div>" +
     "<div class='stat'><b>" + att + "</b><span>En attente</span></div>" +
     "<div class='stat'><b>" + acc + "</b><span>Acceptées</span></div>" +
     "<div class='stat'><b>" + ref + "</b><span>Refusées</span></div>" +
-    "<div class='stat'><b>" + data.effectif.length + "</b><span>Effectif</span></div>" +
+    "<div class='stat'><b>" + actifs + "/" + (data.effectif || []).length + "</b><span>Effectif actif</span></div>" +
     "<div class='stat'><b>" + (data.ouvert ? "OUVERT" : "FERMÉ") + "</b><span>Garage</span></div>" +
     "</div>" +
     "<div class='card'><h2>🚦 Contrôle du garage</h2>" +
@@ -441,14 +549,42 @@ function renderDashboard() {
   }
   html += "</div>";
 
-  html += "<div class='card'><h2>👥 Effectif</h2>";
+  html += "<div class='card'><h2>👥 Effectif & grades</h2>";
+  html += "<p class='muted'>Change le grade d'un membre, mets-le inactif ou retire-le.</p>";
   if (!data.effectif.length) html += "<p class='muted'>Aucun membre enregistré.</p>";
   data.effectif.forEach((m, i) => {
+    const options = POSTES.map((g) => "<option value='" + g + "'" + (g === m.grade ? " selected" : "") + ">" + g + "</option>").join("");
     html +=
-      "<div style='border-bottom:1px solid #2a2a2e;padding:8px 0;display:flex;justify-content:space-between;align-items:center'><span>" + m + "</span>" +
-      "<form method='POST' action='/staff/retirer'><input type='hidden' name='index' value='" + i + "'><button class='btn sec' type='submit'>Retirer</button></form></div>";
+      "<form method='POST' action='/staff/grade' style='display:flex;gap:8px;align-items:center;border-bottom:1px solid #2a2a2e;padding:10px 0;flex-wrap:wrap'>" +
+      "<input type='hidden' name='index' value='" + i + "'>" +
+      "<span style='flex:1;min-width:150px'>" + m.nom + (m.actif ? "" : " <span class='badge b-refuse'>Inactif</span>") + "</span>" +
+      "<select name='grade' style='max-width:200px;margin:0'>" + options + "</select>" +
+      "<button class='btn' type='submit'>Enregistrer</button></form>" +
+      "<div style='display:flex;gap:8px;margin-bottom:8px'>" +
+      "<form method='POST' action='/staff/actif'><input type='hidden' name='index' value='" + i + "'><button class='btn sec' type='submit'>" + (m.actif ? "Rendre inactif" : "Rendre actif") + "</button></form>" +
+      "<form method='POST' action='/staff/retirer'><input type='hidden' name='index' value='" + i + "'><button class='btn refuse' type='submit'>Retirer</button></form></div>";
   });
+  html +=
+    "<div style='margin-top:14px;padding-top:14px;border-top:1px solid #2a2a2e'>" +
+    "<form method='POST' action='/staff/membre' style='display:flex;gap:8px'>" +
+    "<input type='text' name='nom' placeholder='Nom du nouveau membre' required>" +
+    "<select name='grade' style='max-width:200px'>" + POSTES.map((g) => "<option value='" + g + "'>" + g + "</option>").join("") + "</select>" +
+    "<button class='btn' type='submit'>Ajouter un membre</button></form></div>";
   html += "</div>";
+
+  const mvp = data.miseEnAvant || {};
+  html += "<div class='card'><h2>🏆 Mise en avant des employés</h2>";
+  html +=
+    "<form method='POST' action='/staff/mise-en-avant'>" +
+    "<input type='text' name='employeMois' placeholder='👑 Employé du mois' value='" + (mvp.employeMois || "") + "'>" +
+    "<input type='text' name='meilleurMecano' placeholder='🔧 Meilleur mécanicien' value='" + (mvp.meilleurMecano || "") + "'>" +
+    "<input type='text' name='meilleurDepanneur' placeholder='🚗 Meilleur dépanneur' value='" + (mvp.meilleurDepanneur || "") + "'>" +
+    "<input type='text' name='meilleureSatisfaction' placeholder='⭐ Meilleure satisfaction client' value='" + (mvp.meilleureSatisfaction || "") + "'>" +
+    "<button class='btn' type='submit'>Enregistrer</button></form>";
+  html +=
+    "<div style='margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2e'><p class='muted'>Publier cette mise en avant sur le site web Benny's.</p>" +
+    "<form method='POST' action='/staff/publier-mise-en-avant'><button class='btn ok' type='submit'>📤 Publier sur le site</button></form>" +
+    "<p class='muted' style='margin-top:8px'>Dernière publication : " + (data.miseEnAvantPublieeLe || "jamais") + "</p></div></div>";
 
   html += "<div class='card'><h2>💰 Tarifs</h2>";
   data.tarifs.forEach((t, i) => {
@@ -514,8 +650,12 @@ const server = http.createServer(async (req, res) => {
       JSON.stringify({
         tarifs: data.tarifs,
         partenaires: data.partenaires,
+        miseEnAvant: data.miseEnAvant || {},
+        effectif: (data.effectif || []).map((m) => ({ nom: m.nom, grade: m.grade, actif: m.actif !== false })),
+        ouvert: !!data.ouvert,
         tarifsPubliesLe: data.tarifsPubliesLe || "jamais",
         partenairesPubliesLe: data.partenairesPubliesLe || "jamais",
+        miseEnAvantPublieeLe: data.miseEnAvantPublieeLe || "jamais",
       })
     );
   }
@@ -608,6 +748,11 @@ const server = http.createServer(async (req, res) => {
     "/staff/garage",
     "/staff/publier-tarifs",
     "/staff/publier-partenaires",
+    "/staff/grade",
+    "/staff/actif",
+    "/staff/membre",
+    "/staff/mise-en-avant",
+    "/staff/publier-mise-en-avant",
   ];
 
   if (req.method === "POST" && actions.indexOf(url) !== -1) {
@@ -642,8 +787,9 @@ const server = http.createServer(async (req, res) => {
         if (c) {
           c.statut = decision === "accepte" ? "accepte" : "refuse";
           if (decision === "accepte") {
-            const entry = (c.nom_rp || "candidat") + " — " + (c.poste || "poste");
-            if (data.effectif.indexOf(entry) === -1) data.effectif.push(entry);
+            const dejaLa = data.effectif.some((m) => m.nom && m.nom.indexOf(c.nom_rp || "") !== -1);
+            if (!dejaLa)
+              data.effectif.push({ nom: c.nom_rp || "candidat", grade: c.poste || "Mécanicien", actif: true });
           }
           saveData(data);
           await log(
@@ -661,8 +807,10 @@ const server = http.createServer(async (req, res) => {
       if (url === "/staff/retirer") {
         const i = parseInt(params.get("index"), 10);
         if (!isNaN(i)) {
+          const retire = data.effectif[i];
           data.effectif.splice(i, 1);
           saveData(data);
+          if (retire) await log("➖ " + retire.nom + " retiré de l'effectif");
         }
       }
 
@@ -710,6 +858,56 @@ const server = http.createServer(async (req, res) => {
         await log("📤 Partenaires publiés sur le site (" + data.partenairesPubliesLe + ")");
       }
 
+      if (url === "/staff/grade") {
+        const i = parseInt(params.get("index"), 10);
+        const grade = params.get("grade") || "Mécanicien";
+        if (!isNaN(i) && data.effectif[i]) {
+          const ancien = data.effectif[i].grade;
+          data.effectif[i].grade = grade;
+          saveData(data);
+          await log("🎖 " + data.effectif[i].nom + " : " + ancien + " → " + grade);
+        }
+      }
+
+      if (url === "/staff/actif") {
+        const i = parseInt(params.get("index"), 10);
+        if (!isNaN(i) && data.effectif[i]) {
+          data.effectif[i].actif = !data.effectif[i].actif;
+          saveData(data);
+          await log(
+            (data.effectif[i].actif ? "🟢 " : "🔴 ") +
+              data.effectif[i].nom +
+              (data.effectif[i].actif ? " est actif" : " est inactif")
+          );
+        }
+      }
+
+      if (url === "/staff/membre") {
+        const nom = params.get("nom") || "";
+        const grade = params.get("grade") || "Mécanicien";
+        if (nom) {
+          data.effectif.push({ nom: nom, grade: grade, actif: true });
+          saveData(data);
+          await log("➕ " + nom + " ajouté à l'effectif (" + grade + ")");
+        }
+      }
+
+      if (url === "/staff/mise-en-avant") {
+        data.miseEnAvant = {
+          employeMois: params.get("employeMois") || "",
+          meilleurMecano: params.get("meilleurMecano") || "",
+          meilleurDepanneur: params.get("meilleurDepanneur") || "",
+          meilleureSatisfaction: params.get("meilleureSatisfaction") || "",
+        };
+        saveData(data);
+      }
+
+      if (url === "/staff/publier-mise-en-avant") {
+        data.miseEnAvantPublieeLe = new Date().toLocaleString("fr-FR");
+        saveData(data);
+        await log("📤 Mise en avant publiée sur le site (" + data.miseEnAvantPublieeLe + ")");
+      }
+
       res.writeHead(302, { Location: "/staff" });
       return res.end();
     });
@@ -740,6 +938,20 @@ server.listen(PORT, () => console.log("🌐 Serveur webhook + dashboard sur le p
 client.once("ready", async () => {
   botReady = true;
   botTag = client.user.tag;
+
+  // Restaurer les donnees sauvegardees sur GitHub
+  try {
+    const distant = await githubLoad();
+    if (distant && typeof distant === "object") {
+      const local = loadData();
+      const fusion = Object.assign({}, local, distant);
+      fs.writeFileSync(DATA_FILE, JSON.stringify(fusion, null, 2), "utf-8");
+      console.log("✅ Données restaurées depuis GitHub");
+    }
+  } catch (e) {
+    console.error("Chargement GitHub impossible :", e.message);
+  }
+
   console.log("✅ Bot Benny's connecté en tant que " + client.user.tag);
   try {
     const rest = new REST({ version: "10" }).setToken(TOKEN);
