@@ -1,5 +1,5 @@
 // ============================================================
-//  BOT DISCORD BENNY'S — version avec espace staff web (/staff)
+//  BOT DISCORD BENNY'S — espace staff web + /clear
 // ============================================================
 
 const fs = require("fs");
@@ -19,7 +19,7 @@ const {
   ActivityType,
 } = require("discord.js");
 
-// --- CONFIG (variables d'environnement) ---------------------
+// --- CONFIG -------------------------------------------------
 const TOKEN = (process.env.DISCORD_TOKEN || "").trim().replace(/^["']|["']$/g, "");
 const GUILD_ID = (process.env.GUILD_ID || "0").trim();
 const SALON_CANDIDATURES_ID = (process.env.SALON_CANDIDATURES_ID || "0").trim();
@@ -214,6 +214,7 @@ client.on("interactionCreate", async (interaction) => {
   );
 });
 
+// --- Commandes slash ----------------------------------------
 const commands = [
   new SlashCommandBuilder().setName("ouvert").setDescription("Ouvrir le garage"),
   new SlashCommandBuilder().setName("ferme").setDescription("Fermer le garage"),
@@ -227,19 +228,15 @@ const commands = [
     .setDescription("Marquer un joueur en service")
     .addUserOption((o) => o.setName("membre").setDescription("Le joueur").setRequired(true)),
   new SlashCommandBuilder()
-    .setName("candidature")
-    .setDescription("Créer un panel de candidature (recruteurs)")
-    .addUserOption((o) =>
-      o.setName("membre").setDescription("Le joueur qui postule").setRequired(true)
-    )
-    .addStringOption((o) =>
-      o.setName("nom_rp").setDescription("Nom / Prénom RP").setRequired(true)
-    )
-    .addStringOption((o) =>
+    .setName("clear")
+    .setDescription("Supprimer des messages de ce salon (staff)")
+    .addIntegerOption((o) =>
       o
-        .setName("poste")
-        .setDescription("Poste visé")
-        .addChoices(...POSTES.map((p) => ({ name: p, value: p })))
+        .setName("nombre")
+        .setDescription("Nombre de messages a supprimer (1-100)")
+        .setMinValue(1)
+        .setMaxValue(100)
+        .setRequired(true)
     ),
 ].map((c) => c.toJSON());
 
@@ -328,28 +325,37 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.reply("🔧 " + m + " est **en service** chez Benny's.");
     return log("🔧 " + m.tag + " en service");
   }
-  if (cmd === "candidature") {
-    const membre = interaction.options.getUser("membre");
-    const nomRp = interaction.options.getString("nom_rp");
-    const poste = interaction.options.getString("poste") || "Apprenti Mécanicien";
+  if (cmd === "clear") {
+    if (ROLE_RECRUTEUR_ID && ROLE_RECRUTEUR_ID !== "0") {
+      const roles = interaction.member ? interaction.member.roles.cache : null;
+      if (!roles || !roles.has(ROLE_RECRUTEUR_ID)) {
+        return interaction.reply({
+          content: "❌ Tu n'as pas la permission d'utiliser cette commande.",
+          ephemeral: true,
+        });
+      }
+    }
 
-    data.candidatures[membre.id] = { nom_rp: nomRp, poste: poste, statut: "en_attente" };
-    saveData(data);
-
-    const embed = new EmbedBuilder()
-      .setTitle("🔧 Nouvelle candidature Benny's")
-      .setColor(0xff6a00)
-      .addFields(
-        { name: "Candidat", value: String(membre), inline: true },
-        { name: "Nom RP", value: nomRp, inline: true },
-        { name: "Poste", value: poste, inline: true },
-        { name: "Statut", value: "⏳ En attente", inline: false }
+    const nombre = interaction.options.getInteger("nombre");
+    try {
+      await interaction.deferReply({ ephemeral: true });
+      const supprimes = await interaction.channel.bulkDelete(nombre, true);
+      await interaction.editReply("🧹 " + supprimes.size + " message(s) supprimé(s).");
+      return log(
+        "🧹 " +
+          supprimes.size +
+          " messages supprimés dans #" +
+          interaction.channel.name +
+          " par " +
+          interaction.user.tag
       );
-
-    return interaction.reply({
-      embeds: [embed],
-      components: [candidatureButtons(membre.id)],
-    });
+    } catch (e) {
+      return interaction.editReply(
+        "❌ Suppression impossible : " +
+          e.message +
+          "\n(Les messages de plus de 14 jours ne peuvent pas être supprimés en masse.)"
+      );
+    }
   }
 });
 
